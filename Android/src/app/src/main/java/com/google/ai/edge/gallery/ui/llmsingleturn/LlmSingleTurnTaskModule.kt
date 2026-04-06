@@ -40,7 +40,7 @@ class LlmSingleTurnTask @Inject constructor() : CustomTask {
   override val task: Task =
     Task(
       id = BuiltInTaskId.LLM_PROMPT_LAB,
-      label = "Prompt Lab",
+      label = "提示实验室",
       category = Category.LLM,
       icon = Icons.Outlined.Widgets,
       models = mutableListOf(),

@@ -664,9 +664,9 @@ private fun IntroText(enableAnimation: Boolean, gm4: Boolean) {
   val introText = buildAnnotatedString {
     val gemma4Url = "https://ai.google.dev/gemma"
     if (gm4) {
-      append("Discover the power of on-device AI models from the ")
-      append(buildTrackableUrlAnnotatedString(url = litertUrl, linkText = "LiteRT community"))
-      append(", featuring the all-new ")
+      append("探索来自 ")
+      append(buildTrackableUrlAnnotatedString(url = litertUrl, linkText = "LiteRT 社区"))
+      append("，全新推出 ")
       append(buildTrackableUrlAnnotatedString(url = gemma4Url, linkText = "Gemma 4"))
       append(".")
     } else {
@@ -719,7 +719,7 @@ private fun TryGm4IntroText(enableAnimation: Boolean) {
       tint = MaterialTheme.colorScheme.primary,
     )
     Text(
-      text = "Try Gemma 4 today",
+      text = "立即体验 Gemma 4",
       style =
         MaterialTheme.typography.headlineSmall.copy(
           fontWeight = FontWeight.Medium,
@@ -731,7 +731,7 @@ private fun TryGm4IntroText(enableAnimation: Boolean) {
   }
 
   Text(
-    "Gemma 4 E2B & E4B are here! Try them in AI Chat, Agent Skills, or the use cases below.",
+    "Gemma 4 E2B 和 E4B 已上线！在 AI 聊天、智能体技能或以下用例中体验它们。",
     style = MaterialTheme.typography.bodyMedium,
     modifier =
       Modifier.graphicsLayer {

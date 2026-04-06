@@ -49,7 +49,7 @@ class MobileActionsTask @Inject constructor() : CustomTask {
   override val task =
     Task(
       id = BuiltInTaskId.LLM_MOBILE_ACTIONS,
-      label = "Mobile Actions",
+      label = "移动操作",
       description = "Perform various device actions through Function Gemma",
       shortDescription = "Leverage device mobile actions",
       docUrl = "https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md",
