@@ -1,0 +1,92 @@
+# GitHub Secrets 配置指南
+
+## 必需的 Secrets
+
+在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加以下 Secrets：
+
+| Secret 名称 | 说明 | 值 |
+|-----------|------|--------|
+| `KEYSTORE_FILE` | Keystore 文件的 Base64 编码 | 见下方获取方法 |
+| `KEYSTORE_PASSWORD` | 密钥库密码 | `gallery123` |
+| `KEY_ALIAS` | 密钥别名 | `gallery` |
+| `KEY_PASSWORD` | 密钥密码 | `gallery123` |
+
+## 获取 KEYSTORE_FILE
+
+### 方法 1：使用已生成的 Keystore
+
+Keystore 文件已生成，Base64 编码如下（复制完整内容）：
+
+```
+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
+BBS49nC2dO6B5KZtcRLZG5qgWhCjBAICJxA=
+```
+
+### 方法 2：自行生成新的 Keystore
+
+```bash
+keytool -genkey -v -keystore gallery-release.keystore -alias gallery -keyalg RSA -keysize 2048 -validity 10000 -storepass gallery123 -keypass gallery123 -dname "CN=Zhang Zheyuan, OU=Music, O=Independent, L=Shanghai, ST=Shanghai, C=CN"
+base64 gallery-release.keystore
+```
+
+将输出的 Base64 字符串复制到 `KEYSTORE_FILE` Secret。
+
+## 验证配置
+
+配置完成后，手动触发一次 workflow dispatch 构建，检查：
+1. Build 步骤是否成功
+2. 生成的 APK 是否使用固定签名
+3. 是否可以覆盖安装到已有版本
+
+## 安全提示
+
+- ⚠️ 永远不要将 keystore 文件提交到 Git 仓库
+- ⚠️ 限制有权访问 GitHub Secrets 的人员
+- ⚠️ 定期备份 keystore 文件到安全位置
