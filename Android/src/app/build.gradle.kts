@@ -51,10 +51,11 @@ android {
   signingConfigs {
     create("release") {
       // Use environment variables from GitHub Actions secrets
+      // If secrets are not configured, fall back to debug signing
       storeFile = file(System.getenv("KEYSTORE_FILE") ?: "debug.keystore")
-      storePassword = System.getenv("KEYSTORE_PASSWORD")
-      keyAlias = System.getenv("KEY_ALIAS")
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"
+      keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
+      keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
     }
   }
 
