@@ -23,6 +23,9 @@ import com.google.gson.annotations.SerializedName
 
 private const val TAG = "AGModelAllowlist"
 
+// 使用中国镜像站加速模型下载
+private const val HF_MIRROR_BASE = "https://hf-mirror.com"
+
 data class DefaultConfig(
   @SerializedName("topK") val topK: Int?,
   @SerializedName("topP") val topP: Float?,
@@ -65,11 +68,11 @@ data class AllowedModel(
   val runtimeType: RuntimeType? = null,
 ) {
   fun toModel(): Model {
-    // Construct HF download url.
+    // Construct HF download url - use China mirror for faster access.
     var version = commitHash
     var downloadedFileName = modelFile
     var downloadUrl =
-      url ?: "https://huggingface.co/$modelId/resolve/$commitHash/$modelFile?download=true"
+      url ?: "$HF_MIRROR_BASE/$modelId/resolve/$commitHash/$modelFile?download=true"
     var sizeInBytes = sizeInBytes
 
     // Handle per-soc model files.
@@ -81,7 +84,7 @@ data class AllowedModel(
           downloadedFileName = info.modelFile ?: "-"
           downloadUrl =
             info.url
-              ?: "https://huggingface.co/$modelId/resolve/${info.commitHash}/${info.modelFile}?download=true"
+              ?: "$HF_MIRROR_BASE/$modelId/resolve/${info.commitHash}/${info.modelFile}?download=true"
           sizeInBytes = info.sizeInBytes ?: -1
         }
       }
@@ -155,7 +158,8 @@ data class AllowedModel(
           .toMutableList()
     }
 
-    var learnMoreUrl = "https://huggingface.co/${modelId}"
+    // Use China mirror for model info page.
+    var learnMoreUrl = "$HF_MIRROR_BASE/${modelId}"
 
     // Misc.
     var showBenchmarkButton = true
