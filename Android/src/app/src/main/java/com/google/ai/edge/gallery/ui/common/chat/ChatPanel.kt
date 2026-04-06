@@ -16,6 +16,9 @@
 
 package com.google.ai.edge.gallery.ui.common.chat
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -48,6 +51,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +77,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -129,6 +134,7 @@ fun ChatPanel(
   val snackbarHostState = remember { SnackbarHostState() }
   val scope = rememberCoroutineScope()
   val haptic = LocalHapticFeedback.current
+  val context = LocalContext.current
   val imageCountToLastConfigChange =
     remember(messages) {
       var imageCount = 0
@@ -156,10 +162,9 @@ fun ChatPanel(
       audioClipMessageCount
     }
 
-  var curMessage by remember { mutableStateOf("") } // Correct state
+  var curMessage by remember { mutableStateOf("") }
   val focusManager = LocalFocusManager.current
 
-  // Remember the LazyListState to control scrolling
   val listState = rememberLazyListState()
   val density = LocalDensity.current
   var showBenchmarkConfigsDialog by remember { mutableStateOf(false) }
@@ -176,12 +181,11 @@ fun ChatPanel(
 
   LaunchedEffect(showImageLimitBanner) {
     if (showImageLimitBanner) {
-      delay(3000) // 3 seconds
+      delay(3000)
       showImageLimitBanner = false
     }
   }
 
-  // Keep track of the last message and last message content.
   val lastMessage: MutableState<ChatMessage?> = remember { mutableStateOf(null) }
   val lastMessageContent: MutableState<String> = remember { mutableStateOf("") }
   if (messages.isNotEmpty()) {
@@ -192,26 +196,20 @@ fun ChatPanel(
     }
   }
 
-  // Scroll to bottom when IME is toggled.
   LaunchedEffect(WindowInsets.ime.getBottom(density)) {
     scrollToBottom(listState = listState, animate = true)
   }
 
-  // Auto-scroll to bottom when a new message is added or message type changes.
   LaunchedEffect(messages.size, lastMessage.value?.type) {
     if (messages.isNotEmpty()) {
       scrollToBottom(listState = listState, animate = true)
     }
   }
 
-  // Scroll to keep up with streaming, ONLY if we are already at the bottom.
   LaunchedEffect(lastMessage.value, lastMessageContent.value, lastMessage.value?.latencyMs) {
     if (messages.isNotEmpty()) {
       val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
       if (lastVisibleItem != null) {
-        // Determines if an automatic scroll is necessary. It is true if the scroll position is
-        // close to the bottom (within 90 pixels of the end offset. 90 is slightly taller than
-        // the "show stats" chip).
         val canScroll =
           lastVisibleItem.index == messages.size - 1 &&
             lastVisibleItem.offset + lastVisibleItem.size - listState.layoutInfo.viewportEndOffset <
@@ -226,13 +224,9 @@ fun ChatPanel(
   val nestedScrollConnection = remember {
     object : NestedScrollConnection {
       override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-        // If downward scroll, clear the focus from any currently focused composable.
-        // This is useful for dismissing software keyboards or hiding text input fields
-        // when the user starts scrolling down a list.
         if (available.y > 0) {
           focusManager.clearFocus()
         }
-        // Let LazyColumn handle the scroll
         return Offset.Zero
       }
     }
@@ -245,7 +239,6 @@ fun ChatPanel(
   }
 
   Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-    // Audio record animation.
     AnimatedVisibility(
       showAudioRecorder,
       enter =
@@ -320,7 +313,6 @@ fun ChatPanel(
                   ),
               horizontalAlignment = hAlign,
             ) messageColumn@{
-              // Sender row.
               var agentName = stringResource(task.agentNameRes)
               if (message.accelerator.isNotEmpty()) {
                 agentName = "$agentName on ${message.accelerator}"
@@ -333,24 +325,12 @@ fun ChatPanel(
                 )
               }
 
-              // Message body.
               when (message) {
-                // Loading.
                 is ChatMessageLoading -> MessageBodyLoading(message = message)
-
-                // Info.
                 is ChatMessageInfo -> MessageBodyInfo(message = message)
-
-                // Warning
                 is ChatMessageWarning -> MessageBodyWarning(message = message)
-
-                // Error
                 is ChatMessageError -> MessageBodyError(message = message)
-
-                // Config values change.
                 is ChatMessageConfigValuesChange -> MessageBodyConfigUpdate(message = message)
-
-                // Prompt templates.
                 is ChatMessagePromptTemplates ->
                   MessageBodyPromptTemplates(
                     message = message,
@@ -362,18 +342,12 @@ fun ChatPanel(
                       )
                     },
                   )
-
-                // Non-system messages.
                 else -> {
-                  // The bubble shape around the message body.
                   var messageBubbleModifier: Modifier = Modifier
                   if (!message.disableBubbleShape) {
-                    // Use a rounded rectangle clip for multi-image image message.
                     if (message is ChatMessageImage && message.bitmaps.size > 1) {
                       messageBubbleModifier = messageBubbleModifier.clip(RoundedCornerShape(6.dp))
-                    }
-                    // For other messages, use a bubble shape to clip.
-                    else {
+                    } else {
                       messageBubbleModifier =
                         messageBubbleModifier.clip(
                           MessageBubbleShape(
@@ -386,57 +360,37 @@ fun ChatPanel(
                   }
                   Box(modifier = messageBubbleModifier) {
                     when (message) {
-                      // Text
                       is ChatMessageText ->
                         MessageBodyText(message = message, inProgress = uiState.inProgress)
-
-                      // Image
                       is ChatMessageImage -> {
                         MessageBodyImage(message = message, onImageClicked = onImageSelected)
                       }
-
-                      // Image with history (for image gen)
                       is ChatMessageImageWithHistory ->
                         MessageBodyImageWithHistory(
                           message = message,
                           imageHistoryCurIndex = imageHistoryCurIndex,
                         )
-
-                      // Audio clip.
                       is ChatMessageAudioClip -> MessageBodyAudioClip(message = message)
-
-                      // Classification result
                       is ChatMessageClassification ->
                         MessageBodyClassification(
                           message = message,
                           modifier =
                             Modifier.width(message.maxBarWidth ?: CLASSIFICATION_BAR_MAX_WIDTH),
                         )
-
-                      // Benchmark result.
                       is ChatMessageBenchmarkResult -> MessageBodyBenchmark(message = message)
-
-                      // Benchmark LLM result.
                       is ChatMessageBenchmarkLlmResult ->
                         MessageBodyBenchmarkLlm(
                           message = message,
                           modifier = Modifier.wrapContentWidth(),
                         )
-
-                      // Webview.
                       is ChatMessageWebView -> MessageBodyWebview(message = message)
-
-                      // Collapsable progress panel.
                       is ChatMessageCollapsableProgressPanel ->
                         MessageBodyCollapsableProgressPanel(message = message)
-
-                      // Thinking
                       is ChatMessageThinking ->
                         MessageBodyThinking(
                           thinkingText = message.content,
                           inProgress = message.inProgress,
                         )
-
                       else -> {}
                     }
                   }
@@ -447,13 +401,34 @@ fun ChatPanel(
                       horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                       LatencyText(message = message)
+                      
+                      // Copy button for agent messages
+                      if (message is ChatMessageText && message.content.isNotEmpty()) {
+                        MessageActionButton(
+                          label = stringResource(R.string.copy),
+                          icon = Icons.Rounded.ContentCopy,
+                          onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("AI Response", message.content)
+                            clipboard.setPrimaryClip(clip)
+                          },
+                          enabled = !uiState.inProgress,
+                        )
+                      }
+                      
+                      // Regenerate button for agent messages
+                      MessageActionButton(
+                        label = stringResource(R.string.run_again),
+                        icon = Icons.Rounded.Refresh,
+                        onClick = { onRunAgainClicked(selectedModel, message) },
+                        enabled = !uiState.inProgress,
+                      )
                     }
                   } else if (message.side == ChatSide.USER) {
                     Row(
                       verticalAlignment = Alignment.CenterVertically,
                       horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                      // Run again button.
                       if (selectedModel.showRunAgainButton) {
                         MessageActionButton(
                           label = stringResource(R.string.run_again),
@@ -463,7 +438,6 @@ fun ChatPanel(
                         )
                       }
 
-                      // Benchmark button
                       if (selectedModel.showBenchmarkButton) {
                         MessageActionButton(
                           label = stringResource(R.string.run_benchmark),
@@ -485,11 +459,9 @@ fun ChatPanel(
 
         SnackbarHost(hostState = snackbarHostState, modifier = Modifier.padding(vertical = 4.dp))
 
-        // Show empty state.
         if (messages.isEmpty() && pickedImagesCount == 0 && pickedAudioClipsCount == 0) {
           emptyStateComposable(selectedModel)
         }
-        // Loading screen when model is initialized for that first time.
         val isFirstInitializing =
           modelInitializationStatus?.status == ModelInitializationStatusType.INITIALIZING &&
             modelInitializationStatus.isFirstInitialization(selectedModel)
@@ -545,7 +517,6 @@ fun ChatPanel(
         onSendMessage = {
           onSendMessage(selectedModel, it)
           curMessage = ""
-          // Hide software keyboard.
           focusManager.clearFocus()
         },
         onOpenPromptTemplatesClicked = {
@@ -580,7 +551,6 @@ fun ChatPanel(
     }
   }
 
-  // Error dialog.
   if (showErrorDialog) {
     ErrorDialog(
       error = modelInitializationStatus?.error ?: "",
@@ -588,7 +558,6 @@ fun ChatPanel(
     )
   }
 
-  // Benchmark config dialog.
   if (showBenchmarkConfigsDialog) {
     BenchmarkConfigDialog(
       onDismissed = { showBenchmarkConfigsDialog = false },
