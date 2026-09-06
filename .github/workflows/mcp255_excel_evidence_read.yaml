@@ -1,0 +1,48 @@
+name: MCP255 Excel evidence reader
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["experimental"]
+    paths:
+      - '.github/workflows/mcp255_excel_evidence_read.yaml'
+      - 'logs/mcp-254_测试日志与文档_20260906.zip'
+
+permissions:
+  contents: read
+
+jobs:
+  read-evidence:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout experimental
+        uses: actions/checkout@v4
+        with:
+          ref: experimental
+          fetch-depth: 1
+
+      - name: Read exact MCP254 Excel evidence ZIP
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile, hashlib
+
+          archive = Path('logs/mcp-254_测试日志与文档_20260906.zip')
+          if not archive.exists():
+              raise SystemExit(f'MISSING_EVIDENCE_ZIP: {archive}')
+          with zipfile.ZipFile(archive, 'r') as z:
+              names = z.namelist()
+              print(f'EVIDENCE_ENTRY_COUNT={len(names)}')
+              if len(names) != 3:
+                  raise SystemExit(f'EXPECTED_3_ENTRIES_GOT_{len(names)}')
+              for i, name in enumerate(names, 1):
+                  data = z.read(name)
+                  print(f'\n===== EVIDENCE_ENTRY {i}/{len(names)}: {name} size={len(data)} sha256={hashlib.sha256(data).hexdigest()} =====')
+                  try:
+                      print(data.decode('utf-8'))
+                  except UnicodeDecodeError:
+                      print(f'[BINARY_ENTRY size={len(data)}]')
+                  print(f'===== END_EVIDENCE_ENTRY {i}: {name} =====\n')
+          PY
