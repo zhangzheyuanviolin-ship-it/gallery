@@ -14,6 +14,8 @@ Call `run_configured_intent` with:
 
 Generated Excel files are saved under `file/`. Use workspace-relative paths only.
 
+For a new workbook, prefer a direct create request. `rows` should normally be a 2D array where every inner array is one worksheet row. Do not wrap `rows` in an extra array level. Use `sheet_name` for one worksheet, or `sheets` as objects containing `name` and `rows` for multiple worksheets. The compatibility layer also tolerates common small-model wrappers, but the canonical forms below are preferred.
+
 Supported operations:
 
 - Create one sheet: `{"operation":"xlsx_create","output_path":"file/data.xlsx","sheet_name":"Sheet1","rows":[["名称","数值"],["A",1]]}`
