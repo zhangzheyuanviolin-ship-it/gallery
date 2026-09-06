@@ -1,0 +1,252 @@
+name: MCP255 Excel evidence build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["experimental"]
+    paths:
+      - '.github/workflows/mcp255_excel_evidence_build.yaml'
+      - 'Android/src/scripts/patch_mcp255_excel_evidence.py'
+      - 'Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentExcelMcp255Compat.kt'
+      - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentExcelMcp255CompatTest.kt'
+      - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp255WireEvidenceTest.kt'
+      - 'Android/src/app/src/main/assets/skills/excel-workbook/SKILL.md'
+      - 'logs/mcp-254_测试日志与文档_20260906.zip'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: mcp255-excel-evidence
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Reproduce MCP254 Excel evidence test build sign and publish MCP255
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LOCAL_VERSION_NAME: '1.0.14-mcp.255'
+      LOCAL_VERSION_CODE: '355'
+      APPLICATION_ID_SUFFIX: '.mcp'
+      APK_RELEASE_TAG: 'mcp255-excel-evidence-v1'
+      APK_NAME: 'local-agent-plaza-1.0.14-mcp.255.apk'
+      ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+      ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+      ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout experimental source
+        uses: actions/checkout@v4
+        with:
+          ref: experimental
+          fetch-depth: 0
+
+      - name: Verify MCP250 golden boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin golden/mcp-250-product-stable:refs/remotes/origin/golden/mcp-250-product-stable
+          test "$(git rev-parse refs/remotes/origin/golden/mcp-250-product-stable)" = '4a4346a199344ac0912984f1f383abedf3b93819'
+          git diff --name-status refs/remotes/origin/golden/mcp-250-product-stable...HEAD | tee /tmp/mcp255-source-diff.txt
+          ! grep -E 'customtasks/(musicgeneration|visualcreation)/|app/src/main/jniLibs/arm64-v8a/' /tmp/mcp255-source-diff.txt
+
+      - name: Reproduce exact three-entry MCP254 Excel evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ZIP='logs/mcp-254_测试日志与文档_20260906.zip'
+          test -s "$ZIP"
+          rm -rf /tmp/mcp254-excel && mkdir -p /tmp/mcp254-excel
+          unzip -o "$ZIP" -d /tmp/mcp254-excel >/dev/null
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/mcp254-excel')
+          names = {p.name for p in root.iterdir()}
+          required = {
+            '20260906-204608-287-excel_workbook.json',
+            '20260906-204544-431-excel_workbook.json',
+            '用户提示词与模型错误工具调用记录_mcp254.txt',
+          }
+          assert names == required, names
+
+          first = json.loads((root / '20260906-204608-287-excel_workbook.json').read_text(encoding='utf-8'))
+          args1 = json.loads(first['model_tool_arguments'])
+          result1 = json.loads(first['tool_result']['raw_result_json'])
+          assert args1['sheets'] == ['销售数据']
+          assert isinstance(args1['rows'][0], list) and len(args1['rows'][0]) == 4
+          assert args1['rows'][1:] == ['智能手机','5999','100','50']
+          assert first['resolved_operation'] == 'xlsx_create'
+          assert result1['error'] == 'Each sheet must be an object.'
+
+          second = json.loads((root / '20260906-204544-431-excel_workbook.json').read_text(encoding='utf-8'))
+          args2 = json.loads(second['model_tool_arguments'])
+          result2 = json.loads(second['tool_result']['raw_result_json'])
+          assert args2['operations'][0]['operation'] == 'create_sheet'
+          assert args2['operations'][0]['sheet_name'] == '演示表格'
+          assert args2['operations'][1]['operation'] == 'insert_rows'
+          assert len(args2['operations'][1]['rows']) == 1 and isinstance(args2['operations'][1]['rows'][0][0], list)
+          assert second['resolved_operation'] == 'xlsx_modify'
+          assert result2['error'] == 'Input path is required.'
+
+          chat = (root / '用户提示词与模型错误工具调用记录_mcp254.txt').read_text(encoding='utf-8')
+          compact = next(line for line in chat.splitlines() if line.startswith('<|tool_call>call:excel_workbook'))
+          standard = next(line for line in chat.splitlines() if line.startswith('<tool_call>{"tool":"excel_workbook"'))
+          assert '<tool_call|>' in compact
+          assert '"rows":[[[' in standard
+          # The note claims U+200B, but the actual persisted tool-call lines contain no U+200B.
+          assert '\u200b' not in compact and '\u200b' not in standard
+          print('MCP254_EXCEL_THREE_ENTRY_EVIDENCE_REPRODUCED')
+          PY
+
+      - name: Materialize MCP251 through MCP255
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m py_compile Android/src/scripts/patch_mcp251_office_skills.py
+          python3 -m py_compile Android/src/scripts/patch_mcp252_office_truth.py
+          python3 -m py_compile Android/src/scripts/patch_mcp253_office_contract.py
+          python3 -m py_compile Android/src/scripts/patch_mcp254_document_conversion.py
+          python3 -m py_compile Android/src/scripts/patch_mcp255_excel_evidence.py
+          cd Android/src
+          python3 scripts/patch_mcp251_office_skills.py
+          python3 scripts/patch_mcp252_office_truth.py
+          python3 scripts/patch_mcp253_office_contract.py
+          python3 scripts/patch_mcp254_document_conversion.py
+          python3 scripts/patch_mcp255_excel_evidence.py
+          grep -F 'MCP255_EXCEL_EVIDENCE_NORMALIZATION' app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentOfficeTruthGuard.kt
+          grep -F 'MCP255_EXCEL_SCHEMA_GUIDANCE' app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTooling.kt
+          grep -F 'promoteNewWorkbookConstructionScript' app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentExcelMcp255Compat.kt
+
+      - name: Checkout stable-diffusion.cpp at MCP250 protected revision
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 19bdfe22d255d5b4dff39d449318b9bc5ea2317f
+          path: Android/src/app/src/main/cpp/third_party/stable-diffusion.cpp
+          submodules: recursive
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare release signing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
+          test -n "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_RELEASE_KEY_ALIAS"
+          test -n "$ANDROID_RELEASE_KEY_PASSWORD"
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/local-agent-plaza-release.jks"
+          echo "ANDROID_RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/local-agent-plaza-release.jks" >> "$GITHUB_ENV"
+
+      - name: Run Office Excel and wire regressions and build release APK
+        working-directory: Android/src
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./gradlew :app:testReleaseUnitTest \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentOfficeTruthGuardTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentOfficeMcp253CompatTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentDocumentConversionMcp254Test' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentExcelMcp255CompatTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp255WireEvidenceTest' \
+            --tests '*ToolCall*Test' \
+            :app:assembleRelease --stacktrace
+
+      - name: Verify protected runtime boundaries after materialization
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git diff --exit-code refs/remotes/origin/golden/mcp-250-product-stable -- \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/musicgeneration \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/visualcreation \
+            Android/src/app/src/main/jniLibs/arm64-v8a
+          grep -F 'executeVerified' Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentOfficeTruthGuard.kt
+          grep -F 'verified' Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentOfficeTruthGuard.kt
+          grep -F 'rolled_back' Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentOfficeTruthGuard.kt
+          grep -F 'MCP250_TOOL_CALL_WIRE_ADAPTER' Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTooling.kt
+
+      - name: Verify signed MCP255 APK identity and five Office assets
+        id: verify
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD_TOOLS="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          APK='Android/src/app/build/outputs/apk/release/app-release.apk'
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$APK"
+          BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -n 1)"
+          echo "$BADGING"
+          echo "$BADGING" | grep "name='com.localagent.plaza.mcp'"
+          echo "$BADGING" | grep "versionCode='355'"
+          echo "$BADGING" | grep "versionName='1.0.14-mcp.255'"
+          for skill in word-document pdf-document excel-workbook powerpoint-presentation document-convert; do
+            unzip -l "$APK" | grep "assets/skills/$skill/SKILL.md"
+          done
+          cp "$APK" "$RUNNER_TEMP/$APK_NAME"
+          sha256sum "$RUNNER_TEMP/$APK_NAME" | tee "$RUNNER_TEMP/$APK_NAME.sha256"
+          echo "apk_sha256=$(cut -d' ' -f1 "$RUNNER_TEMP/$APK_NAME.sha256")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload MCP255 Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-agent-plaza-mcp-255
+          path: |
+            ${{ runner.temp }}/${{ env.APK_NAME }}
+            ${{ runner.temp }}/${{ env.APK_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish permanent MCP255 GitHub Release
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gh release view "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title 'Local Agent Plaza MCP255 Excel Evidence Fix' \
+              --notes 'MCP255 is derived from the exact two Excel audit logs plus one chat-record file uploaded for MCP254 on 2026-09-06. It repairs string-sheet and row-shape dialects, promotes no-input create_sheet+insert_rows construction scripts to xlsx_create, preserves modify semantics for existing workbooks, documents the canonical Excel create contract, keeps Truth Guard verification and rollback, and regression-checks the existing tool-call wire compatibility without changing the protected wire runtime unless evidence requires it.'
+          gh release upload "$APK_RELEASE_TAG" "$RUNNER_TEMP/$APK_NAME" "$RUNNER_TEMP/$APK_NAME.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release view "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,url,assets
+
+      - name: Write MCP255 result marker
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY' > /tmp/mcp255-result.json
+          import json, os
+          print(json.dumps({
+              'schema': 'local-agent-plaza.mcp255-excel-evidence-result.v1',
+              'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_number': int(os.environ['GITHUB_RUN_NUMBER']),
+              'commit_sha': os.environ['GITHUB_SHA'],
+              'version_name': os.environ['LOCAL_VERSION_NAME'],
+              'version_code': int(os.environ['LOCAL_VERSION_CODE']),
+              'package': 'com.localagent.plaza.mcp',
+              'release_tag': os.environ['APK_RELEASE_TAG'],
+              'apk_name': os.environ['APK_NAME'],
+              'apk_sha256': '${{ steps.verify.outputs.apk_sha256 }}',
+              'evidence_zip': 'logs/mcp-254_测试日志与文档_20260906.zip',
+              'evidence_entries': 3,
+              'excel_log_entries': 2,
+              'chat_record_entries': 1,
+              'release_url': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/tag/{os.environ['APK_RELEASE_TAG']}",
+              'apk_url': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['APK_RELEASE_TAG']}/{os.environ['APK_NAME']}",
+          }, ensure_ascii=False, indent=2))
+          PY
+          content="$(base64 -w0 /tmp/mcp255-result.json)"
+          api="repos/${GITHUB_REPOSITORY}/contents/docs/mcp255_excel_evidence_result.json"
+          old="$(gh api "$api?ref=experimental" 2>/dev/null || true)"
+          sha="$(printf '%s' "$old" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("sha", ""))' 2>/dev/null || true)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message='Update MCP255 Excel evidence build result' -f branch=experimental -f sha="$sha" -f content="$content"
+          else
+            gh api --method PUT "$api" -f message='Add MCP255 Excel evidence build result' -f branch=experimental -f content="$content"
+          fi
