@@ -55,6 +55,12 @@ jobs:
                   print(f'===== END_EVIDENCE_ENTRY {i}: {name} =====\n')
           PY
 
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Materialize 254 parser and run exact wire probes
         shell: bash
         run: |
