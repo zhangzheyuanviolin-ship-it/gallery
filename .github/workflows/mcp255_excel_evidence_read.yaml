@@ -41,8 +41,53 @@ jobs:
                   data = z.read(name)
                   print(f'\n===== EVIDENCE_ENTRY {i}/{len(names)}: {name} size={len(data)} sha256={hashlib.sha256(data).hexdigest()} =====')
                   try:
-                      print(data.decode('utf-8'))
+                      text = data.decode('utf-8')
+                      print(text)
+                      if name.endswith('.txt'):
+                          print('===== TOOL_CALL_REPR =====')
+                          for line in text.splitlines():
+                              if 'tool_call' in line or 'call:excel_workbook' in line:
+                                  print(repr(line))
+                                  print('CODEPOINTS=' + ' '.join(f'U+{ord(ch):04X}' for ch in line if ord(ch) > 127 or ch in '<>|_'))
+                          print('===== END_TOOL_CALL_REPR =====')
                   except UnicodeDecodeError:
                       print(f'[BINARY_ENTRY size={len(data)}]')
                   print(f'===== END_EVIDENCE_ENTRY {i}: {name} =====\n')
           PY
+
+      - name: Materialize 254 parser and run exact wire probes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd Android/src
+          python3 scripts/patch_mcp251_office_skills.py
+          python3 scripts/patch_mcp252_office_truth.py
+          python3 scripts/patch_mcp253_office_contract.py
+          python3 scripts/patch_mcp254_document_conversion.py
+          # Gradle configuration applies patch_tool_call_wire_compat.py exactly as the release build does.
+          cat > app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp255WireProbeTest.kt <<'KT'
+          package com.google.ai.edge.gallery.customtasks.agentchat
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Assert.assertNotNull
+          import org.junit.Test
+
+          class Mcp255WireProbeTest {
+            @Test fun observedCompactGemmaExcelCall_isParsed() {
+              val raw = "<|tool_call>call:excel_workbook{operation:\"create\",rows:[[\"国家\",\"模型名称\",\"开发者\",\"模型特点\"],[\"中国\",\"Qwen\",\"阿里巴巴\",\"中文能力\"]]}<tool_call|>"
+              val call = parseCompatToolCall(raw)
+              assertNotNull(call)
+              assertEquals("excel_workbook", call!!.toolName)
+              assertEquals("create", call.arguments.getString("operation"))
+              assertEquals(2, call.arguments.getJSONArray("rows").length())
+            }
+
+            @Test fun zeroWidthAroundXmlToolCall_isParsed() {
+              val raw = "\u200B<tool_call>\u200B{\"tool\":\"excel_workbook\",\"arguments\":{\"operation\":\"create\",\"rows\":[[[\"项目名称\",\"预算\"],[\"市场推广\",\"50000\"]]],\"sheets\":[{\"name\":\"项目进度表\"}]}}\u200B</tool_call>\u200B"
+              val call = parseCompatToolCall(raw)
+              assertNotNull(call)
+              assertEquals("excel_workbook", call!!.toolName)
+            }
+          }
+          KT
+          ./gradlew :app:testReleaseUnitTest --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp255WireProbeTest' --stacktrace
