@@ -16,7 +16,8 @@ class Mcp256PhoneToolCallRegressionTest {
     assertThat(AgentTextToolCallFallback.hasStrongToolSignal(fixtureOne)).isTrue()
     val call = AgentTextToolCallFallback.parse(fixtureOne)
     assertThat(call).isNotNull()
-    assertThat(call!!.toolName).isEqualTo(EXCEL_WORKBOOK_SKILL_NAME)
+    // Wire tool names use underscores; the built-in skill id uses hyphens.
+    assertThat(call!!.toolName).isEqualTo("excel_workbook")
 
     val args = JSONObject(call.arguments.toString())
     AgentExcelMcp255Compat.normalizeBeforeRouting(EXCEL_WORKBOOK_SKILL_NAME, args)
@@ -35,7 +36,7 @@ class Mcp256PhoneToolCallRegressionTest {
     assertThat(AgentTextToolCallFallback.hasStrongToolSignal(fixtureTwo)).isTrue()
     val call = AgentTextToolCallFallback.parse(fixtureTwo)
     assertThat(call).isNotNull()
-    assertThat(call!!.toolName).isEqualTo(EXCEL_WORKBOOK_SKILL_NAME)
+    assertThat(call!!.toolName).isEqualTo("excel_workbook")
     assertThat(call.arguments.has("operation")).isFalse()
 
     val normalized =
@@ -69,7 +70,7 @@ class Mcp256PhoneToolCallRegressionTest {
     val raw = "<|tool_call>call:excel_workbook{operation:\"create\",rows:[[\"A\",\"B\"],[\"1\",\"2\"]]}<tool_call|>"
     val call = AgentTextToolCallFallback.parse(raw)
     assertThat(call).isNotNull()
-    assertThat(call!!.toolName).isEqualTo(EXCEL_WORKBOOK_SKILL_NAME)
+    assertThat(call!!.toolName).isEqualTo("excel_workbook")
     assertThat(call.arguments.getString("operation")).isEqualTo("create")
   }
 }
