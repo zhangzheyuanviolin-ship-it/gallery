@@ -1,0 +1,14 @@
+{
+  "schema": "local-agent-plaza.mcp256-text-tool-dispatch-result.v1",
+  "run_id": 34097530069,
+  "commit_sha": "f2759040bc8d30d290ab254a71d1026cc83443e5",
+  "version_name": "1.0.14-mcp.256",
+  "version_code": 356,
+  "package": "com.localagent.plaza.mcp",
+  "release_tag": "mcp256-text-tool-dispatch-v1",
+  "apk_name": "local-agent-plaza-1.0.14-mcp.256.apk",
+  "apk_sha256": "890b4f6897c90a71194f41a8c40b0f8d27a4f03fbd7ff714316c821639c20bc9",
+  "phone_regression_fixtures": 2,
+  "root_cause": "mode-gated completion textual dispatch bypassed shared wire adapter",
+  "apk_url": "https://github.com/zhangzheyuanviolin-ship-it/local-agent-plaza/releases/download/mcp256-text-tool-dispatch-v1/local-agent-plaza-1.0.14-mcp.256.apk"
+}
