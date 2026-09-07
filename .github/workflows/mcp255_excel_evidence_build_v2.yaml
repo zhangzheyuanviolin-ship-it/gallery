@@ -166,7 +166,10 @@ jobs:
             Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/visualcreation \
             Android/src/app/src/main/jniLibs/arm64-v8a
           grep -F 'executeVerified' Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentOfficeTruthGuard.kt
-          grep -F 'MCP250_TOOL_CALL_WIRE_ADAPTER' Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTooling.kt
+          WIRE='Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/CompatToolCallWireAdapter.kt'
+          test -s "$WIRE"
+          grep -F 'internal object CompatToolCallWireAdapter' "$WIRE"
+          grep -F 'normalizeFirstToolCall' "$WIRE"
 
       - name: Verify signed MCP255 APK identity and Office assets
         id: verify
