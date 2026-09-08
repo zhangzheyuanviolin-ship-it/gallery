@@ -53,7 +53,8 @@ final_coord = COORD.read_text(encoding="utf-8")
 for required in (
     "MCP259_RECOVERED_TOOL_CONTINUATION",
     "AgentTextToolCallFallback.parse(text)",
-    'JSONObject().put("tool", recoveredCall.toolName)',
+    '.put("tool", recoveredCall.toolName)',
+    '.put("arguments", recoveredCall.arguments)',
     "COMPAT_FRESH_REASON_TOOL_CONTINUATION",
 ):
     if required not in final_coord:
