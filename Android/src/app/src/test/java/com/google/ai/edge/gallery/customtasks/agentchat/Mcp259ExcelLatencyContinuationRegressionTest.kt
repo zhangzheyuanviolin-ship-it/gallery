@@ -27,7 +27,7 @@ USER_REQUEST
   }
 
   @Test
-  fun recoveredTruncatedExcelCall_marksAwaitingAndForcesFreshToolContinuation() {
+  fun recoveredTruncatedExcelCall_hostAcceptanceForcesFreshToolContinuation() {
     val topLevel =
       AgentCompatRuntimeCoordinator.prepareInput(
         modelName = modelName,
@@ -37,14 +37,26 @@ USER_REQUEST
     assertThat(topLevel.requiresFreshConversation).isTrue()
     assertThat(topLevel.freshConversationReason).isEqualTo(COMPAT_FRESH_REASON_TOP_LEVEL)
 
+    // Same compact CREATE dialect MCP259 advertises, with the final outer JSON brace omitted.
     val truncated =
       """<tool_call>{"tool":"excel_workbook","arguments":{"rows":[["A","B"],["1","2"]],"sheet_name":"Sheet1"}</tool_call>"""
+    val parsed = AgentTextToolCallFallback.parse(truncated)
+    assertThat(parsed).isNotNull()
+    assertThat(parsed!!.toolName).isEqualTo("excel_workbook")
+
+    // Runtime completion happens first in the real app, then AgentChatScreen accepts the parsed
+    // dispatch. Host acceptance is the final state authority before the tool actually executes.
     val decision =
       AgentCompatRuntimeCoordinator.onGenerationCompleted(
         modelName = modelName,
         generatedText = truncated,
       )
     assertThat(decision.blockedRepeatedToolCall).isFalse()
+    AgentCompatRuntimeCoordinator.onHostToolDispatchAccepted(
+      modelName = modelName,
+      toolName = parsed.toolName,
+      arguments = parsed.arguments,
+    )
 
     val continuation = prepareSuccessfulExcelToolResult()
     assertFreshToolContinuationAndRecordMetrics(continuation)
