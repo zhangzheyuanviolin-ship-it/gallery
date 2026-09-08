@@ -65,16 +65,55 @@ def patch_viewmodel(text: str) -> str:
 """
     text = replace_once(text, old_stream, new_stream, "raw stream accumulation")
 
-    done_block = """                    setInProgress(false)
+    # The intercepted and ordinary completion branches have different surrounding structure.
+    # Patch them independently so source verification cannot accidentally count a coincidental tail.
+    old_intercept_done = """                  if (done && generationFinished.compareAndSet(false, true)) {
+                    setInProgress(false)
                     onDone()
+                  }
+                  return@resultListener
 """
-    done_block_new = """                    setInProgress(false)
+    new_intercept_done = """                  if (done && generationFinished.compareAndSet(false, true)) {
+                    setInProgress(false)
                     setPreparing(false)
                     onCompletedText(rawVisibleResult.toString())
                     onDone()
+                  }
+                  return@resultListener
 """
-    require_count(text, done_block, 2, "success completion callbacks")
-    text = text.replace(done_block, done_block_new)
+    text = replace_once(
+        text,
+        old_intercept_done,
+        new_intercept_done,
+        "intercepted success completion callback",
+    )
+
+    old_normal_done_tail = """                  setInProgress(false)
+                  onDone()
+                }
+              }
+            }
+          }
+
+        val cleanUpListener: () -> Unit = {
+"""
+    new_normal_done_tail = """                  setInProgress(false)
+                  setPreparing(false)
+                  onCompletedText(rawVisibleResult.toString())
+                  onDone()
+                }
+              }
+            }
+          }
+
+        val cleanUpListener: () -> Unit = {
+"""
+    text = replace_once(
+        text,
+        old_normal_done_tail,
+        new_normal_done_tail,
+        "ordinary success completion callback",
+    )
 
     old_run_again_sig = """  fun runAgain(
     model: Model,
