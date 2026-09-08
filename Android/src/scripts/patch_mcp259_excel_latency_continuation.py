@@ -59,8 +59,11 @@ if "MCP259_EXCEL_COMPACT_CREATE_SCHEMA" not in tooling:
         "    // MCP259_EXCEL_COMPACT_CREATE_SCHEMA",
         "    // Creating a workbook often requires the model to emit the cell contents itself. Keep",
         "    // the wire envelope minimal so decode time is spent on data, not duplicated JSON.",
-        r'    tools += "- excel_workbook: CREATE prefer the shortest form {\"rows\":[[...]],\"sheet_name\":\"Sheet1\"}. Omit operation, input_path, and output_path when not needed. Never duplicate identical rows in both root rows and sheets. READ/MODIFY use {\"operation\":\"read|modify\",\"input_path\":\"file/input.xlsx\",...}. Common small-model wrappers are normalized safely."'.replace('tools += \\"', 'tools += "').rsplit('\\"', 1)[0] + '"',
+        r'    tools += "- excel_workbook: CREATE prefer the shortest form {\"rows\":[[...]],\"sheet_name\":\"Sheet1\"}. Omit operation, input_path, and output_path when not needed. Never duplicate identical rows in both root rows and sheets. READ/MODIFY use {\"operation\":\"read|modify\",\"input_path\":\"file/input.xlsx\",...}. Common small-model wrappers are normalized safely."',
     ]
+    # In the raw Python literal above, only the JSON quotes are escaped in the emitted Kotlin line;
+    # the Kotlin string delimiters themselves are plain quotes.
+    replacement[-1] = replacement[-1].replace('tools += \\"-', 'tools += "-').removesuffix('\\"') + '"'
     lines[index:index + 1] = replacement
     tooling = "\n".join(lines) + ("\n" if tooling.endswith("\n") else "")
     TOOLING.write_text(tooling, encoding="utf-8")
