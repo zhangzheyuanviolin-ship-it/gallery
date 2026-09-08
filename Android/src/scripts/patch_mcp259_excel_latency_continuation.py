@@ -4,9 +4,15 @@
 Runs after MCP251-MCP258 materialization. MCP258 made structurally recoverable Excel calls executable,
 but the runtime coordinator could still classify a dialect/repaired call as an ordinary final answer.
 That leaves awaitingToolResult=false, so the subsequent TOOL_RESULT bypasses MCP206's fresh
-conversation continuation path and can incur a very large post-tool TTFT. MCP259 makes the runtime
-state machine use the same shared fallback parser as dispatch, and teaches the model the shortest
-safe Excel-create wire form so it does not duplicate rows at root and under sheets.
+conversation continuation path and can incur a very large post-tool TTFT.
+
+MCP259 closes the gap in two ways:
+1. Runtime fingerprinting reuses the same shared textual-tool recovery parser as dispatch.
+2. The host explicitly confirms every parsed call that is actually about to execute, so coordinator
+   state cannot diverge from host execution even if future wire dialects change again.
+
+It also teaches the model the shortest safe Excel-create wire form so it does not duplicate rows at
+root and under sheets.
 """
 from pathlib import Path
 
@@ -14,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AGENT = ROOT / "app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat"
 COORD = AGENT / "AgentCompatRuntimeCoordinator.kt"
 TOOLING = AGENT / "AgentTooling.kt"
+AGENT_SCREEN = AGENT / "AgentChatScreen.kt"
 
 
 def require_count(text: str, needle: str, expected: int, label: str) -> None:
@@ -32,10 +39,30 @@ if "MCP259_RECOVERED_TOOL_CONTINUATION" not in coord:
     old = '''  private fun extractToolCallFingerprint(text: String): String? {\n    val open = text.indexOf(TOOL_CALL_OPEN_TAG_RUNTIME, ignoreCase = true)\n'''
     new = '''  private fun extractToolCallFingerprint(text: String): String? {\n    // MCP259_RECOVERED_TOOL_CONTINUATION\n    // Runtime state and UI dispatch must agree on what is an executable textual tool call.\n    // MCP256-MCP258 intentionally accept multiple wire dialects and narrowly repair proven\n    // structural Excel truncations; if dispatch can execute one of those calls, the coordinator\n    // must mark awaitingToolResult=true so the following TOOL_RESULT takes MCP206's fresh\n    // tool-continuation path instead of reusing a bloated top-level Conversation.\n    val recoveredCall = AgentTextToolCallFallback.parse(text)\n    if (recoveredCall != null) {\n      val recoveredEnvelope =\n        JSONObject()\n          .put("tool", recoveredCall.toolName)\n          .put("arguments", recoveredCall.arguments)\n      return canonicalizeJsonObject(recoveredEnvelope).take(MAX_FINGERPRINT_CHARS)\n    }\n\n    val open = text.indexOf(TOOL_CALL_OPEN_TAG_RUNTIME, ignoreCase = true)\n'''
     coord = replace_once(coord, old, new, "runtime recovered tool fingerprint hook")
-    COORD.write_text(coord, encoding="utf-8")
-    print(f"MCP259 patched: {COORD}")
+
+if "MCP259_HOST_DISPATCH_STATE_AUTHORITY" not in coord:
+    old = '''  @Synchronized\n  internal fun onGenerationFailed(modelName: String) {\n    states[modelName]?.awaitingToolResult = false\n  }\n'''
+    new = '''  // MCP259_HOST_DISPATCH_STATE_AUTHORITY\n  // The host's accepted dispatch is the final authority that this turn is not complete yet.\n  // If onGenerationCompleted misclassified a future textual dialect and prematurely committed the\n  // turn, roll that provisional completion back before the tool result arrives. This makes every\n  // actually executed compatibility tool eligible for MCP206's fresh tool-continuation path.\n  @Synchronized\n  internal fun onHostToolDispatchAccepted(\n    modelName: String,\n    toolName: String,\n    arguments: JSONObject,\n  ) {\n    val state = states[modelName] ?: return\n    val wasAwaitingToolResult = state.awaitingToolResult\n    if (state.completed) {\n      sessions[modelName]?.let { session ->\n        val completedIndex =\n          session.completedTurns.indexOfLast { entry -> entry.turnIndex == state.userTurnIndex }\n        if (completedIndex >= 0) session.completedTurns.removeAt(completedIndex)\n      }\n      state.completed = false\n    }\n    val acceptedEnvelope =\n      JSONObject()\n        .put("tool", toolName)\n        .put("arguments", arguments)\n    state.lastToolFingerprint =\n      canonicalizeJsonObject(acceptedEnvelope).take(MAX_FINGERPRINT_CHARS)\n    if (!wasAwaitingToolResult) state.consecutiveRepeatedToolCalls = 0\n    state.awaitingToolResult = true\n  }\n\n  @Synchronized\n  internal fun onGenerationFailed(modelName: String) {\n    states[modelName]?.awaitingToolResult = false\n  }\n'''
+    coord = replace_once(coord, old, new, "host dispatch state authority")
+
+COORD.write_text(coord, encoding="utf-8")
+print(f"MCP259 patched: {COORD}")
+
+
+agent_screen = AGENT_SCREEN.read_text(encoding="utf-8")
+if "MCP259_HOST_DISPATCH_ACCEPTED" not in agent_screen:
+    old = '''        compatToolStepsByModel[model.name] = currentSteps + 1\n        removeCurrentTurnAgentTextMessages(viewModel = viewModel, model = model)\n'''
+    new = '''        // MCP259_HOST_DISPATCH_ACCEPTED\n        // A parsed call that is actually about to execute is authoritative runtime state.\n        AgentCompatRuntimeCoordinator.onHostToolDispatchAccepted(\n          modelName = model.name,\n          toolName = parsedToolCall.toolName,\n          arguments = parsedToolCall.arguments,\n        )\n        compatToolStepsByModel[model.name] = currentSteps + 1\n        removeCurrentTurnAgentTextMessages(viewModel = viewModel, model = model)\n'''
+    agent_screen = replace_once(
+        agent_screen,
+        old,
+        new,
+        "accepted dispatch runtime-state synchronization",
+    )
+    AGENT_SCREEN.write_text(agent_screen, encoding="utf-8")
+    print(f"MCP259 patched: {AGENT_SCREEN}")
 else:
-    print(f"MCP259 already applied: {COORD}")
+    print(f"MCP259 already applied: {AGENT_SCREEN}")
 
 
 tooling = TOOLING.read_text(encoding="utf-8")
@@ -76,10 +103,24 @@ for required in (
     "AgentTextToolCallFallback.parse(text)",
     '.put("tool", recoveredCall.toolName)',
     '.put("arguments", recoveredCall.arguments)',
+    "MCP259_HOST_DISPATCH_STATE_AUTHORITY",
+    "onHostToolDispatchAccepted",
+    "state.awaitingToolResult = true",
+    "state.completed = false",
     "COMPAT_FRESH_REASON_TOOL_CONTINUATION",
 ):
     if required not in final_coord:
         raise SystemExit(f"MCP259 fail-closed: coordinator marker missing: {required}")
+
+final_screen = AGENT_SCREEN.read_text(encoding="utf-8")
+for required in (
+    "MCP259_HOST_DISPATCH_ACCEPTED",
+    "AgentCompatRuntimeCoordinator.onHostToolDispatchAccepted(",
+    "toolName = parsedToolCall.toolName",
+    "arguments = parsedToolCall.arguments",
+):
+    if required not in final_screen:
+        raise SystemExit(f"MCP259 fail-closed: dispatch synchronization marker missing: {required}")
 
 final_tooling = TOOLING.read_text(encoding="utf-8")
 for required in (
