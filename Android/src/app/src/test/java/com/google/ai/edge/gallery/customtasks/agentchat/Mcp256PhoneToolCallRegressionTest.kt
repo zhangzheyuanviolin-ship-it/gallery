@@ -32,7 +32,7 @@ class Mcp256PhoneToolCallRegressionTest {
   }
 
   @Test
-  fun exactPhoneFixtureTwo_isParsedWithoutOperationAndBlankOverflowIsTrimmed() {
+  fun exactPhoneFixtureTwo_isParsedAndMcp258PromotesUnambiguousCreate() {
     assertThat(AgentTextToolCallFallback.hasStrongToolSignal(fixtureTwo)).isTrue()
     val call = AgentTextToolCallFallback.parse(fixtureTwo)
     assertThat(call).isNotNull()
@@ -44,8 +44,9 @@ class Mcp256PhoneToolCallRegressionTest {
         skillName = EXCEL_WORKBOOK_SKILL_NAME,
         rawArguments = JSONObject(call.arguments.toString()),
       )
-    // No explicit operation is deliberately deferred to workspace-aware safe inference.
-    assertThat(normalized.getString("operation")).isEqualTo("office_auto")
+    // MCP258: rows/sheets with no input workbook are an unambiguous create request and must move
+    // directly toward the XLSX writer instead of lingering at the office_auto intermediate state.
+    assertThat(normalized.getString("operation")).isEqualTo("xlsx_create")
     val rows = normalized.getJSONArray("rows")
     assertThat(rows.length()).isEqualTo(7)
     for (i in 0 until rows.length()) {
