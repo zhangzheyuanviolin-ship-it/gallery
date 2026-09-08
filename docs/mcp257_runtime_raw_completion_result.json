@@ -1,0 +1,14 @@
+{
+  "schema": "local-agent-plaza.mcp257-runtime-raw-completion-result.v1",
+  "run_id": 34223192282,
+  "commit_sha": "3be525d0cbbce21c04f0737cb3aa4885e662f0d5",
+  "version_name": "1.0.14-mcp.257",
+  "version_code": 357,
+  "package": "com.localagent.plaza.mcp",
+  "release_tag": "mcp257-runtime-raw-completion-v1",
+  "apk_name": "local-agent-plaza-1.0.14-mcp.257.apk",
+  "apk_sha256": "a1d3668e76b1158a4a4d27923f8e98166421cb2bf68be9a09c6fa4e76f4a4b9d",
+  "root_cause": "MCP256 parsed only the final UI ChatMessageText; runtime output can be segmented or bypassed by UI message lifecycle, so the full textual tool call was not the completion text inspected by Agent dispatch",
+  "fix": "capture complete raw runtime stream and plumb it through normal send, continuation, and Run again completion paths before Agent dispatch",
+  "apk_url": "https://github.com/zhangzheyuanviolin-ship-it/local-agent-plaza/releases/download/mcp257-runtime-raw-completion-v1/local-agent-plaza-1.0.14-mcp.257.apk"
+}
