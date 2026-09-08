@@ -1,0 +1,8 @@
+{
+  "schema": "local-agent-plaza.mcp259-ci-last-run.v1",
+  "run_id": 34240418977,
+  "run_attempt": 1,
+  "commit_sha": "a3cc6b3615647fca92ad90a8497a12761dbc3c90",
+  "job_status": "failure",
+  "workflow": "MCP259 Excel continuation latency build"
+}
