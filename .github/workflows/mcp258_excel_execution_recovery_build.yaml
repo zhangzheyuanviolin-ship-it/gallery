@@ -8,6 +8,8 @@ on:
       - '.github/workflows/mcp258_excel_execution_recovery_build.yaml'
       - 'Android/src/scripts/patch_mcp258_excel_execution_recovery.py'
       - 'Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTextToolCallFallback.kt'
+      - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentExcelMcp255CompatTest.kt'
+      - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp256PhoneToolCallRegressionTest.kt'
       - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp258ExcelExecutionRecoveryTest.kt'
 
 permissions:
