@@ -1,0 +1,39 @@
+{
+  "schema": "local-agent-plaza.mcp259-excel-latency-continuation-result.v1",
+  "run_id": 34245240113,
+  "commit_sha": "86353404a76cb00824f77f087a31cda193a7538e",
+  "version_name": "1.0.14-mcp.259",
+  "version_code": 359,
+  "package": "com.localagent.plaza.mcp",
+  "release_tag": "mcp259-excel-latency-continuation-v1",
+  "apk_name": "local-agent-plaza-1.0.14-mcp.259.apk",
+  "apk_sha256": "d2e33526ce169a4f26ee7d470b837b484d711d91e9ab584c0d921e5715c17780",
+  "mcp258_phone_execution": "confirmed: XLSX was created and visible in workspace",
+  "excel_baseline": {
+    "request_total_ms": 217073.83,
+    "initial_total_generation_ms": 84621.01,
+    "initial_output_chars": 920,
+    "tool_exec_ms": 643.77,
+    "continuation_ttft_ms": 87560.16,
+    "continuation_prepare_ms_total": 0.0,
+    "last_continuation_prepare_ms": "unavailable",
+    "last_continuation_reset_ms": "unavailable",
+    "last_fresh_conversation_reason": "top_level_user_turn",
+    "first_callback_2_pss_mb": 5369.95,
+    "first_callback_2_native_heap_allocated_mb": 8320.87
+  },
+  "network_comparison": {
+    "request_total_ms": 126484.09,
+    "initial_total_generation_ms": 20568.96,
+    "initial_output_chars": 100,
+    "tool_exec_ms": 7453.74,
+    "continuation_ttft_ms": 29313.5,
+    "continuation_prepare_ms_total": 9.99,
+    "last_continuation_reset_ms": 9.63,
+    "last_fresh_conversation_reason": "tool_continuation"
+  },
+  "root_cause": "dispatch and runtime state classification could disagree for textual tool-call dialects/repairs; an executable Excel call could run while coordinator awaitingToolResult remained false, causing TOOL_RESULT to bypass the MCP206 fresh tool_continuation path. Excel CREATE prompt also encouraged redundant rows+sheets JSON, inflating first-pass decode.",
+  "fix": "use AgentTextToolCallFallback in runtime tool-call fingerprinting so executable recovered calls enter tool_continuation state; advertise minimal Excel CREATE as rows+sheet_name without duplicated rows/sheets.",
+  "device_acceptance": "XLSX must still be created; diagnostic must report last_fresh_conversation_reason=tool_continuation and available/nonzero continuation prepare/reset metrics. Initial output chars should decrease when the model follows the compact create schema; latency improvement must be measured on phone.",
+  "apk_url": "https://github.com/zhangzheyuanviolin-ship-it/local-agent-plaza/releases/download/mcp259-excel-latency-continuation-v1/local-agent-plaza-1.0.14-mcp.259.apk"
+}
