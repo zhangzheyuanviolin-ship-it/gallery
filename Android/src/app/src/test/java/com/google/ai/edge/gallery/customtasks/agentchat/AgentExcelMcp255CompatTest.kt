@@ -9,7 +9,10 @@ class AgentExcelMcp255CompatTest {
   @Test fun evidence204608_stringSheetAndFlattenedTail_areRecovered() {
     val raw = JSONObject("""{"rows":[["产品名称","单价","库存数量","销售目标"],"智能手机","5999","100","50"],"sheets":["销售数据"],"operations":[]}""")
     val normalized = AgentOfficeTruthGuard.prepareCompatRequest(EXCEL_WORKBOOK_SKILL_NAME, raw)
-    assertThat(normalized.getString("operation")).isEqualTo("office_auto")
+    // MCP258: rows/sheets with no input workbook are unambiguously a creation request. The
+    // compatibility layer must resolve directly to xlsx_create so the call proceeds to the XLSX
+    // writer instead of stopping at the old office_auto intermediate state.
+    assertThat(normalized.getString("operation")).isEqualTo("xlsx_create")
     val sheet = normalized.getJSONArray("sheets").getJSONObject(0)
     assertThat(sheet.getString("name")).isEqualTo("销售数据")
     assertThat(sheet.getJSONArray("rows").length()).isEqualTo(2)
