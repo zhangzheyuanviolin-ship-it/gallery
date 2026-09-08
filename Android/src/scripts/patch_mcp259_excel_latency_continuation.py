@@ -40,9 +40,29 @@ else:
 
 tooling = TOOLING.read_text(encoding="utf-8")
 if "MCP259_EXCEL_COMPACT_CREATE_SCHEMA" not in tooling:
-    old = '''    tools += "- excel_workbook arguments: {\\\"operation\\\":\\\"create|read|modify\\\",\\\"input_path\\\":\\\"file/input.xlsx\\\",\\\"output_path\\\":\\\"file/output.xlsx\\\",\\\"rows\\\":[[...]],\\\"sheets\\\":[...],\\\"operations\\\":[...]}. Creates, reads, or edits XLSX workbooks."\n'''
-    new = '''    // MCP259_EXCEL_COMPACT_CREATE_SCHEMA\n    // Creating a workbook often requires the model to emit the cell contents itself. Keep the wire\n    // envelope minimal so small on-device models spend decode time on data, not duplicate JSON.\n    tools += "- excel_workbook: for CREATE prefer the shortest form {\\\"rows\\\":[[...]],\\\"sheet_name\\\":\\\"Sheet1\\\"}. Omit operation, input_path, and output_path when not needed. Never duplicate identical rows in both root rows and sheets. For READ/MODIFY use {\\\"operation\\\":\\\"read|modify\\\",\\\"input_path\\\":\\\"file/input.xlsx\\\",...}."\n'''
-    tooling = replace_once(tooling, old, new, "Excel compact COMPAT schema")
+    # MCP252-MCP255 rewrite the human-readable suffix of the MCP251 Excel schema line, so anchoring
+    # the complete original MCP251 text is intentionally wrong here. Locate the one actual emitted
+    # Excel tool-advertisement line after all previous patches, require uniqueness, then replace the
+    # whole line. This removes the rows+sheets duplicate example itself, not only its prose.
+    lines = tooling.splitlines()
+    matches = [
+        index
+        for index, line in enumerate(lines)
+        if 'tools += "- excel_workbook arguments:' in line
+    ]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"MCP259 fail-closed: materialized Excel schema line count={len(matches)}, expected=1"
+        )
+    index = matches[0]
+    replacement = [
+        "    // MCP259_EXCEL_COMPACT_CREATE_SCHEMA",
+        "    // Creating a workbook often requires the model to emit the cell contents itself. Keep",
+        "    // the wire envelope minimal so decode time is spent on data, not duplicated JSON.",
+        r'    tools += "- excel_workbook: CREATE prefer the shortest form {\"rows\":[[...]],\"sheet_name\":\"Sheet1\"}. Omit operation, input_path, and output_path when not needed. Never duplicate identical rows in both root rows and sheets. READ/MODIFY use {\"operation\":\"read|modify\",\"input_path\":\"file/input.xlsx\",...}. Common small-model wrappers are normalized safely."',
+    ]
+    lines[index:index + 1] = replacement
+    tooling = "\n".join(lines) + ("\n" if tooling.endswith("\n") else "")
     TOOLING.write_text(tooling, encoding="utf-8")
     print(f"MCP259 patched: {TOOLING}")
 else:
@@ -63,10 +83,14 @@ for required in (
 final_tooling = TOOLING.read_text(encoding="utf-8")
 for required in (
     "MCP259_EXCEL_COMPACT_CREATE_SCHEMA",
+    "excel_workbook: CREATE prefer the shortest form",
     "sheet_name",
-    "Never duplicate identical rows",
+    "Omit operation, input_path, and output_path when not needed",
+    "Never duplicate identical rows in both root rows and sheets",
 ):
     if required not in final_tooling:
         raise SystemExit(f"MCP259 fail-closed: compact Excel schema marker missing: {required}")
+if 'tools += "- excel_workbook arguments:' in final_tooling:
+    raise SystemExit("MCP259 fail-closed: legacy wide Excel schema line still present")
 
 print("MCP259_EXCEL_LATENCY_CONTINUATION_PATCH_PASS")
