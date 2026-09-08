@@ -1,6 +1,8 @@
 package com.google.ai.edge.gallery.customtasks.agentchat
 
 import com.google.common.truth.Truth.assertThat
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -35,8 +37,6 @@ USER_REQUEST
     assertThat(topLevel.requiresFreshConversation).isTrue()
     assertThat(topLevel.freshConversationReason).isEqualTo(COMPAT_FRESH_REASON_TOP_LEVEL)
 
-    // One final outer object brace is missing. MCP258 can safely repair this envelope and dispatch it.
-    // MCP259 requires the runtime coordinator to make the same decision before the tool executes.
     val truncated =
       """<tool_call>{"tool":"excel_workbook","arguments":{"rows":[["A","B"],["1","2"]],"sheet_name":"Sheet1"}</tool_call>"""
     val decision =
@@ -46,41 +46,8 @@ USER_REQUEST
       )
     assertThat(decision.blockedRepeatedToolCall).isFalse()
 
-    val continuation =
-      AgentCompatRuntimeCoordinator.prepareInput(
-        modelName = modelName,
-        rawInput =
-          """TOOL_RESULT
-tool: excel_workbook
-status: succeeded
-payload:
-created workbook.xlsx
-
-You are in compatibility tool mode.
-Use this tool result to answer the original user request directly.""",
-        historyBudgetChars = 3600,
-      )
-
-    assertThat(continuation.requiresFreshConversation).isTrue()
-    assertThat(continuation.freshConversationReason)
-      .isEqualTo(COMPAT_FRESH_REASON_TOOL_CONTINUATION)
-    assertThat(continuation.historyStepCount).isEqualTo(1)
-
-    AgentCompatRuntimeCoordinator.recordContinuationPreparation(
-      modelName = modelName,
-      prepareMs = 8.0,
-      resetMs = 7.0,
-      rawInputChars = continuation.rawInputChars,
-      effectiveInputChars = continuation.effectiveInputChars,
-      historyStepCount = continuation.historyStepCount,
-      historyChars = continuation.historyChars,
-    )
-    val snapshot = AgentCompatRuntimeCoordinator.snapshot(modelName)
-    assertThat(snapshot).isNotNull()
-    assertThat(snapshot!!.lastFreshConversationReason)
-      .isEqualTo(COMPAT_FRESH_REASON_TOOL_CONTINUATION)
-    assertThat(snapshot.continuationPrepareMsTotal).isGreaterThan(0.0)
-    assertThat(snapshot.lastContinuationResetMs).isGreaterThan(0.0)
+    val continuation = prepareSuccessfulExcelToolResult()
+    assertFreshToolContinuationAndRecordMetrics(continuation)
   }
 
   @Test
@@ -99,19 +66,61 @@ Use this tool result to answer the original user request directly.""",
       generatedText = alternate,
     )
 
-    val continuation =
-      AgentCompatRuntimeCoordinator.prepareInput(
-        modelName = modelName,
-        rawInput = "TOOL_RESULT\ntool: excel_workbook\nstatus: succeeded\npayload:\nok",
-        historyBudgetChars = 3600,
-      )
+    val continuation = prepareSuccessfulExcelToolResult()
     assertThat(continuation.requiresFreshConversation).isTrue()
     assertThat(continuation.freshConversationReason)
       .isEqualTo(COMPAT_FRESH_REASON_TOOL_CONTINUATION)
+    assertThat(continuation.historyStepCount).isEqualTo(1)
   }
 
   @Test
-  fun ordinaryFinalAnswer_doesNotPretendToAwaitToolResult() {
+  fun hostAcceptedDispatch_recoversCoordinatorThatPrematurelyCompletedTurn() {
+    AgentCompatRuntimeCoordinator.prepareInput(
+      modelName = modelName,
+      rawInput = initialInput,
+      historyBudgetChars = 3600,
+    )
+
+    // Simulate the exact architectural disagreement MCP259 must make impossible: runtime saw a
+    // representation it did not recognize and provisionally completed the user turn, while the host
+    // parser later obtained an executable Excel call from its authoritative completion text.
+    AgentCompatRuntimeCoordinator.onGenerationCompleted(
+      modelName = modelName,
+      generatedText = "unrecognized runtime representation",
+    )
+    val beforeRecovery = AgentCompatRuntimeCoordinator.snapshot(modelName)
+    assertThat(beforeRecovery).isNotNull()
+    assertThat(beforeRecovery!!.sessionCompletedTurnCount).isEqualTo(1)
+
+    val acceptedArguments =
+      JSONObject()
+        .put(
+          "rows",
+          JSONArray()
+            .put(JSONArray().put("A").put("B"))
+            .put(JSONArray().put("1").put("2")),
+        )
+        .put("sheet_name", "Sheet1")
+    AgentCompatRuntimeCoordinator.onHostToolDispatchAccepted(
+      modelName = modelName,
+      toolName = "excel_workbook",
+      arguments = acceptedArguments,
+    )
+
+    val afterRecovery = AgentCompatRuntimeCoordinator.snapshot(modelName)
+    assertThat(afterRecovery).isNotNull()
+    // The provisional final turn must be rolled back because the host is actually executing a tool.
+    assertThat(afterRecovery!!.sessionCompletedTurnCount).isEqualTo(0)
+
+    val continuation = prepareSuccessfulExcelToolResult()
+    assertThat(continuation.requiresFreshConversation).isTrue()
+    assertThat(continuation.freshConversationReason)
+      .isEqualTo(COMPAT_FRESH_REASON_TOOL_CONTINUATION)
+    assertThat(continuation.historyStepCount).isEqualTo(1)
+  }
+
+  @Test
+  fun ordinaryFinalAnswer_withoutHostDispatch_doesNotPretendToAwaitToolResult() {
     AgentCompatRuntimeCoordinator.prepareInput(
       modelName = modelName,
       rawInput = initialInput,
@@ -144,5 +153,44 @@ Use this tool result to answer the original user request directly.""",
     assertThat(prompt).contains("Omit operation, input_path, and output_path when not needed")
     assertThat(prompt).contains("Never duplicate identical rows in both root rows and sheets")
     assertThat(prompt).doesNotContain("\\\"rows\\\":[[...]],\\\"sheets\\\":[...]")
+  }
+
+  private fun prepareSuccessfulExcelToolResult(): CompatPreparedInput {
+    return AgentCompatRuntimeCoordinator.prepareInput(
+      modelName = modelName,
+      rawInput =
+        """TOOL_RESULT
+tool: excel_workbook
+status: succeeded
+payload:
+created workbook.xlsx
+
+You are in compatibility tool mode.
+Use this tool result to answer the original user request directly.""",
+      historyBudgetChars = 3600,
+    )
+  }
+
+  private fun assertFreshToolContinuationAndRecordMetrics(continuation: CompatPreparedInput) {
+    assertThat(continuation.requiresFreshConversation).isTrue()
+    assertThat(continuation.freshConversationReason)
+      .isEqualTo(COMPAT_FRESH_REASON_TOOL_CONTINUATION)
+    assertThat(continuation.historyStepCount).isEqualTo(1)
+
+    AgentCompatRuntimeCoordinator.recordContinuationPreparation(
+      modelName = modelName,
+      prepareMs = 8.0,
+      resetMs = 7.0,
+      rawInputChars = continuation.rawInputChars,
+      effectiveInputChars = continuation.effectiveInputChars,
+      historyStepCount = continuation.historyStepCount,
+      historyChars = continuation.historyChars,
+    )
+    val snapshot = AgentCompatRuntimeCoordinator.snapshot(modelName)
+    assertThat(snapshot).isNotNull()
+    assertThat(snapshot!!.lastFreshConversationReason)
+      .isEqualTo(COMPAT_FRESH_REASON_TOOL_CONTINUATION)
+    assertThat(snapshot.continuationPrepareMsTotal).isGreaterThan(0.0)
+    assertThat(snapshot.lastContinuationResetMs).isGreaterThan(0.0)
   }
 }
