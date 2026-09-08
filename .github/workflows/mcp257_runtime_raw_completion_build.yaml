@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/mcp257_runtime_raw_completion_build.yaml'
       - 'Android/src/scripts/patch_mcp257_runtime_raw_completion.py'
+      - 'Android/src/scripts/patch_mcp257_pre_mcp224_bridge.py'
       - 'Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentCompletionTextResolver.kt'
       - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp257RuntimeRawCompletionRegressionTest.kt'
 
@@ -55,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          for p in patch_mcp251_office_skills.py patch_mcp252_office_truth.py patch_mcp253_office_contract.py patch_mcp254_document_conversion.py patch_mcp255_excel_evidence.py patch_mcp256_text_tool_dispatch.py patch_mcp257_runtime_raw_completion.py; do
+          for p in patch_mcp251_office_skills.py patch_mcp252_office_truth.py patch_mcp253_office_contract.py patch_mcp254_document_conversion.py patch_mcp255_excel_evidence.py patch_mcp256_text_tool_dispatch.py patch_mcp257_runtime_raw_completion.py patch_mcp257_pre_mcp224_bridge.py; do
             python3 -m py_compile "Android/src/scripts/$p"
           done
           cd Android/src
@@ -66,6 +67,9 @@ jobs:
           python3 scripts/patch_mcp255_excel_evidence.py
           python3 scripts/patch_mcp256_text_tool_dispatch.py
           python3 scripts/patch_mcp257_runtime_raw_completion.py
+          # MCP224 is still the authoritative owner of the legacy fixed-step block and removes it
+          # during Gradle configuration. Restore only its exact pre-patch anchor before that stage.
+          python3 scripts/patch_mcp257_pre_mcp224_bridge.py
 
           VM='app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatViewModel.kt'
           LS='app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatScreen.kt'
@@ -87,6 +91,7 @@ jobs:
           grep -F 'rawCompletionTextByModel[model.name] = rawText' "$AS"
           grep -F 'removeCurrentTurnAgentTextMessages' "$AS"
           grep -F 'viewModel = viewModel' "$AS"
+          grep -F 'if (currentSteps >= MAX_COMPAT_TOOL_STEPS)' "$AS"
           ! grep -F 'AgentTextToolCallFallback.parse(lastAgentText.content)' "$AS"
           test -s "$AR"
 
