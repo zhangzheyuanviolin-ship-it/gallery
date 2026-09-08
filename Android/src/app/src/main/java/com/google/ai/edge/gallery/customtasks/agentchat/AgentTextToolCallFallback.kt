@@ -22,22 +22,100 @@ internal object AgentTextToolCallFallback {
     // followed by an object key (a quoted string plus ':'). If it is followed by another scalar
     // value instead, that close bracket cannot be valid at that object position and is removed.
     val repairedExcelText = repairPrematureExcelRowsArrayClosures(rawText)
-    if (repairedExcelText != rawText) {
-      parseCompatToolCall(repairedExcelText)?.let { return it }
-      val repairedCanonical = CompatToolCallWireAdapter.normalizeFirstToolCall(repairedExcelText)
+
+    // MCP258_TRUNCATED_TOOL_OBJECT_CLOSE_REPAIR
+    // Phone evidence on 2026-09-08 contained a semantically complete Excel call whose arrays and
+    // strings were balanced, but the model omitted exactly the final outer JSON object brace before
+    // </tool_call>. Recover only when the canonical wrapper exists and a structural scan proves that
+    // strings and arrays are complete, no closing delimiter ever underflows, and only one or two
+    // object braces remain open. This turns recoverable tool intent into execution instead of merely
+    // hiding the protocol leak.
+    val repairedStructureText = repairTruncatedToolObjectClosures(repairedExcelText)
+    if (repairedStructureText != rawText) {
+      parseCompatToolCall(repairedStructureText)?.let { return it }
+      val repairedCanonical = CompatToolCallWireAdapter.normalizeFirstToolCall(repairedStructureText)
       if (!repairedCanonical.isNullOrBlank()) {
         parseCompatToolCall(repairedCanonical)?.let { return it }
+        val repairedCanonicalStructure = repairTruncatedToolObjectClosures(repairedCanonical)
+        if (repairedCanonicalStructure != repairedCanonical) {
+          parseCompatToolCall(repairedCanonicalStructure)?.let { return it }
+        }
       }
     }
 
     // Then normalize Qwen/Gemma/GLM/Mistral/DeepSeek/GPT-OSS and other supported wire dialects.
     val canonical = CompatToolCallWireAdapter.normalizeFirstToolCall(rawText) ?: return null
     if (canonical.isBlank()) return null
-    return parseCompatToolCall(canonical)
+    parseCompatToolCall(canonical)?.let { return it }
+    val repairedCanonical = repairTruncatedToolObjectClosures(canonical)
+    if (repairedCanonical != canonical) {
+      parseCompatToolCall(repairedCanonical)?.let { return it }
+    }
+    return null
   }
 
   internal fun hasStrongToolSignal(rawText: String): Boolean =
     CompatToolCallWireAdapter.hasStrongToolSignal(rawText)
+
+  private fun repairTruncatedToolObjectClosures(rawText: String): String {
+    val openTag = "<tool_call>"
+    val closeTag = "</tool_call>"
+    val openIndex = rawText.indexOf(openTag, ignoreCase = true)
+    if (openIndex < 0) return rawText
+    val bodyStart = openIndex + openTag.length
+    val closeIndex = rawText.indexOf(closeTag, startIndex = bodyStart, ignoreCase = true)
+    if (closeIndex < 0) return rawText
+
+    val body = rawText.substring(bodyStart, closeIndex)
+    if (!body.trimStart().startsWith("{")) return rawText
+
+    var objectDepth = 0
+    var arrayDepth = 0
+    var inString = false
+    var escaping = false
+    var sawObject = false
+    for (char in body) {
+      if (escaping) {
+        escaping = false
+        continue
+      }
+      if (char == '\\' && inString) {
+        escaping = true
+        continue
+      }
+      if (char == '"') {
+        inString = !inString
+        continue
+      }
+      if (inString) continue
+
+      when (char) {
+        '{' -> {
+          objectDepth++
+          sawObject = true
+        }
+        '}' -> {
+          objectDepth--
+          if (objectDepth < 0) return rawText
+        }
+        '[' -> arrayDepth++
+        ']' -> {
+          arrayDepth--
+          if (arrayDepth < 0) return rawText
+        }
+      }
+    }
+
+    if (!sawObject || inString || escaping || arrayDepth != 0 || objectDepth !in 1..2) {
+      return rawText
+    }
+
+    val insertionOffset = body.indexOfLast { !it.isWhitespace() } + 1
+    if (insertionOffset <= 0) return rawText
+    val repairedBody =
+      body.substring(0, insertionOffset) + "}".repeat(objectDepth) + body.substring(insertionOffset)
+    return rawText.substring(0, bodyStart) + repairedBody + rawText.substring(closeIndex)
+  }
 
   private fun repairPrematureExcelRowsArrayClosures(rawText: String): String {
     if (!rawText.contains("excel_workbook", ignoreCase = true) || !rawText.contains("\"rows\"")) {
