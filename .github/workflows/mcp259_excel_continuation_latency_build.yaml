@@ -1,0 +1,228 @@
+name: MCP259 Excel continuation latency build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["experimental"]
+    paths:
+      - '.github/workflows/mcp259_excel_continuation_latency_build.yaml'
+      - 'Android/src/scripts/patch_mcp259_excel_latency_continuation.py'
+      - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp259ExcelContinuationLatencyRegressionTest.kt'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: mcp259-excel-continuation-latency
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Restore Excel continuation fast path and publish MCP259
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LOCAL_VERSION_NAME: '1.0.14-mcp.259'
+      LOCAL_VERSION_CODE: '359'
+      APPLICATION_ID_SUFFIX: '.mcp'
+      APK_RELEASE_TAG: 'mcp259-excel-continuation-latency-v1'
+      APK_NAME: 'local-agent-plaza-1.0.14-mcp.259.apk'
+      ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+      ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+      ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout experimental source
+        uses: actions/checkout@v4
+        with:
+          ref: experimental
+          fetch-depth: 0
+
+      - name: Verify MCP250 protected boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin golden/mcp-250-product-stable:refs/remotes/origin/golden/mcp-250-product-stable
+          test "$(git rev-parse refs/remotes/origin/golden/mcp-250-product-stable)" = '4a4346a199344ac0912984f1f383abedf3b93819'
+          git diff --name-status refs/remotes/origin/golden/mcp-250-product-stable...HEAD | tee /tmp/mcp259-source-diff.txt
+          ! grep -E 'customtasks/(musicgeneration|visualcreation)/|app/src/main/jniLibs/arm64-v8a/' /tmp/mcp259-source-diff.txt
+
+      - name: Materialize MCP251 through MCP259 and prove continuation route
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for p in patch_mcp251_office_skills.py patch_mcp252_office_truth.py patch_mcp253_office_contract.py patch_mcp254_document_conversion.py patch_mcp255_excel_evidence.py patch_mcp256_text_tool_dispatch.py patch_mcp257_runtime_raw_completion.py patch_mcp258_excel_execution_recovery.py patch_mcp259_excel_latency_continuation.py patch_mcp257_pre_mcp224_bridge.py; do
+            python3 -m py_compile "Android/src/scripts/$p"
+          done
+          cd Android/src
+          python3 scripts/patch_mcp251_office_skills.py
+          python3 scripts/patch_mcp252_office_truth.py
+          python3 scripts/patch_mcp253_office_contract.py
+          python3 scripts/patch_mcp254_document_conversion.py
+          python3 scripts/patch_mcp255_excel_evidence.py
+          python3 scripts/patch_mcp256_text_tool_dispatch.py
+          python3 scripts/patch_mcp257_runtime_raw_completion.py
+          python3 scripts/patch_mcp258_excel_execution_recovery.py
+          python3 scripts/patch_mcp259_excel_latency_continuation.py
+          # MCP224 remains owner of the legacy fixed-step block and removes it during Gradle config.
+          python3 scripts/patch_mcp257_pre_mcp224_bridge.py
+
+          COORD='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentCompatRuntimeCoordinator.kt'
+          TOOLING='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTooling.kt'
+          FB='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTextToolCallFallback.kt'
+          VM='app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatViewModel.kt'
+          LM='app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatModelHelper.kt'
+
+          # MCP257/MCP258 execution recovery remains intact.
+          grep -F 'MCP257_RUNTIME_RAW_COMPLETION' "$VM"
+          grep -F 'MCP258_TRUNCATED_TOOL_OBJECT_CLOSE_REPAIR' "$FB"
+
+          # MCP259: runtime state classification must reuse the same recoverable parser as dispatch.
+          grep -F 'MCP259_RECOVERED_TOOL_CONTINUATION' "$COORD"
+          grep -F 'AgentTextToolCallFallback.parse(text)' "$COORD"
+          grep -F 'state.awaitingToolResult = !blocked' "$COORD"
+          grep -F 'COMPAT_FRESH_REASON_TOOL_CONTINUATION' "$COORD"
+          grep -F 'requiresFreshConversation = true' "$COORD"
+
+          # Fresh continuation still resets only Conversation and reuses the loaded Engine.
+          grep -F 'resetConversation(' "$LM"
+          grep -F 'reason=${prepared.freshConversationReason}' "$LM"
+
+          # MCP259: Excel CREATE wire guidance must not encourage duplicate root rows + sheets.
+          grep -F 'MCP259_EXCEL_COMPACT_CREATE_SCHEMA' "$TOOLING"
+          grep -F 'for CREATE prefer the shortest form' "$TOOLING"
+          grep -F 'Never duplicate identical rows in both root rows and sheets' "$TOOLING"
+
+      - name: Checkout stable-diffusion.cpp at MCP250 protected revision
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 19bdfe22d255d5b4dff39d449318b9bc5ea2317f
+          path: Android/src/app/src/main/cpp/third_party/stable-diffusion.cpp
+          submodules: recursive
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare release signing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
+          test -n "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_RELEASE_KEY_ALIAS"
+          test -n "$ANDROID_RELEASE_KEY_PASSWORD"
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/local-agent-plaza-release.jks"
+          echo "ANDROID_RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/local-agent-plaza-release.jks" >> "$GITHUB_ENV"
+
+      - name: Run continuation state Office regressions and build release APK
+        working-directory: Android/src
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./gradlew :app:testReleaseUnitTest \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentOfficeTruthGuardTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentOfficeMcp253CompatTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentDocumentConversionMcp254Test' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentExcelMcp255CompatTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp255WireEvidenceTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp256PhoneToolCallRegressionTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp257RuntimeRawCompletionRegressionTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp258ExcelExecutionRecoveryTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp259ExcelContinuationLatencyRegressionTest' \
+            --tests '*ToolCall*Test' \
+            :app:assembleRelease --stacktrace
+
+      - name: Verify protected runtime boundaries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git diff --exit-code refs/remotes/origin/golden/mcp-250-product-stable -- \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/musicgeneration \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/visualcreation \
+            Android/src/app/src/main/jniLibs/arm64-v8a
+
+      - name: Verify signed MCP259 APK identity and continuation markers
+        id: verify
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD_TOOLS="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          APK='Android/src/app/build/outputs/apk/release/app-release.apk'
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$APK"
+          BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -n 1)"
+          echo "$BADGING" | grep "name='com.localagent.plaza.mcp'"
+          echo "$BADGING" | grep "versionCode='359'"
+          echo "$BADGING" | grep "versionName='1.0.14-mcp.259'"
+          for skill in word-document pdf-document excel-workbook powerpoint-presentation document-convert; do
+            unzip -l "$APK" | grep "assets/skills/$skill/SKILL.md"
+          done
+          mkdir -p "$RUNNER_TEMP/dex"
+          unzip -q "$APK" 'classes*.dex' -d "$RUNNER_TEMP/dex"
+          grep -a -F 'MCP259_RECOVERED_TOOL_CONTINUATION' "$RUNNER_TEMP"/dex/classes*.dex || true
+          grep -a -F 'Never duplicate identical rows' "$RUNNER_TEMP"/dex/classes*.dex
+          grep -a -F 'tool_continuation' "$RUNNER_TEMP"/dex/classes*.dex
+          grep -a -F 'xlsx_create' "$RUNNER_TEMP"/dex/classes*.dex
+          cp "$APK" "$RUNNER_TEMP/$APK_NAME"
+          SHA="$(sha256sum "$RUNNER_TEMP/$APK_NAME" | cut -d' ' -f1)"
+          echo "$SHA  $APK_NAME" > "$RUNNER_TEMP/$APK_NAME.sha256"
+          echo "apk_sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Upload MCP259 Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-agent-plaza-mcp-259
+          path: |
+            ${{ runner.temp }}/${{ env.APK_NAME }}
+            ${{ runner.temp }}/${{ env.APK_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish permanent MCP259 GitHub Release
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gh release view "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title 'Local Agent Plaza MCP259 Excel Continuation Latency Fix' \
+              --notes 'MCP259 fixes the performance regression exposed by the successful MCP258 phone Excel run. A malformed-but-recoverable Excel tool call could be repaired and executed by dispatch while the runtime coordinator had already misclassified it as a final answer. The following TOOL_RESULT then bypassed the MCP206 fresh tool-continuation path, matching the phone diagnostics where continuation_prepare_ms_total was zero and last_fresh_conversation_reason remained top_level_user_turn. MCP259 makes runtime classification reuse the shared recovery parser, forcing recovered calls to remain awaitingToolResult and restoring fresh Conversation continuation while reusing the loaded Engine. It also teaches Excel CREATE to emit one compact rows payload instead of duplicating rows under sheets. Device acceptance: the XLSX must still be created, and diagnostics should show tool_continuation with nonzero continuation preparation metrics; initial tool-call output should materially shrink when the model follows the compact schema.'
+          gh release upload "$APK_RELEASE_TAG" "$RUNNER_TEMP/$APK_NAME" "$RUNNER_TEMP/$APK_NAME.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Write MCP259 result marker
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY' > /tmp/mcp259-result.json
+          import json, os
+          print(json.dumps({
+            'schema':'local-agent-plaza.mcp259-excel-continuation-latency-result.v1',
+            'run_id':int(os.environ['GITHUB_RUN_ID']),
+            'commit_sha':os.environ['GITHUB_SHA'],
+            'version_name':os.environ['LOCAL_VERSION_NAME'],
+            'version_code':int(os.environ['LOCAL_VERSION_CODE']),
+            'package':'com.localagent.plaza.mcp',
+            'release_tag':os.environ['APK_RELEASE_TAG'],
+            'apk_name':os.environ['APK_NAME'],
+            'apk_sha256':'${{ steps.verify.outputs.apk_sha256 }}',
+            'root_cause':'MCP258 dispatch repaired and executed a malformed Excel call, but AgentCompatRuntimeCoordinator classified the unrepaired raw completion as a final answer; awaitingToolResult became false, so TOOL_RESULT bypassed MCP206 fresh tool_continuation and produced extreme post-tool TTFT',
+            'fix':'reuse AgentTextToolCallFallback in runtime tool-call fingerprinting so dispatch and coordinator agree; recovered calls keep awaitingToolResult=true and TOOL_RESULT forces a fresh Conversation continuation while reusing Engine; compact Excel CREATE schema avoids duplicate rows+sheets payloads',
+            'device_acceptance':'XLSX must still be created; diagnostics should report last_fresh_conversation_reason=tool_continuation and nonzero continuation_prepare_ms_total/last_continuation_prepare_ms; initial_output_chars should materially shrink when compact CREATE form is followed',
+            'apk_url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['APK_RELEASE_TAG']}/{os.environ['APK_NAME']}"
+          }, ensure_ascii=False, indent=2))
+          PY
+          content="$(base64 -w0 /tmp/mcp259-result.json)"
+          api="repos/${GITHUB_REPOSITORY}/contents/docs/mcp259_excel_continuation_latency_result.json"
+          old="$(gh api "$api?ref=experimental" 2>/dev/null || true)"
+          sha="$(printf '%s' "$old" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("sha", ""))' 2>/dev/null || true)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message='Update MCP259 Excel continuation latency result' -f branch=experimental -f sha="$sha" -f content="$content"
+          else
+            gh api --method PUT "$api" -f message='Add MCP259 Excel continuation latency result' -f branch=experimental -f content="$content"
+          fi
