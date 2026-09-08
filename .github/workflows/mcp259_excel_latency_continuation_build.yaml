@@ -67,7 +67,6 @@ jobs:
           python3 scripts/patch_mcp257_runtime_raw_completion.py
           python3 scripts/patch_mcp258_excel_execution_recovery.py
           python3 scripts/patch_mcp259_excel_latency_continuation.py
-          # MCP224 remains owner of the legacy fixed-step block and removes it during Gradle config.
           python3 scripts/patch_mcp257_pre_mcp224_bridge.py
 
           AS='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentChatScreen.kt'
@@ -80,7 +79,7 @@ jobs:
           VM='app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatViewModel.kt'
           MH='app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatModelHelper.kt'
 
-          # Preserve the already phone-verified MCP258 functional execution path.
+          # Preserve phone-verified MCP258 functional execution.
           grep -F 'MCP257_RUNTIME_RAW_COMPLETION' "$VM"
           grep -F 'MCP257_RUNTIME_RAW_TEXT_AUTHORITY' "$AS"
           grep -F 'MCP258_TRUNCATED_TOOL_OBJECT_CLOSE_REPAIR' "$FB"
@@ -90,23 +89,25 @@ jobs:
           grep -F 'private fun createXlsx' "$OS"
           grep -F 'writeBytes(' "$OS"
 
-          # MCP259: runtime classification must use the same recoverable parser as dispatch.
+          # Runtime and dispatch must classify the same recoverable call as executable.
           grep -F 'MCP259_RECOVERED_TOOL_CONTINUATION' "$COORD"
           grep -F 'AgentTextToolCallFallback.parse(text)' "$COORD"
           grep -F '.put("tool", recoveredCall.toolName)' "$COORD"
-          grep -F 'COMPAT_FRESH_REASON_TOOL_CONTINUATION' "$COORD"
           grep -F 'state.awaitingToolResult = !blocked' "$COORD"
+          grep -F 'COMPAT_FRESH_REASON_TOOL_CONTINUATION' "$COORD"
 
-          # MCP206/MCP209 fresh-Conversation continuation path must still reset Conversation, not Engine.
+          # Fresh continuation resets Conversation only and keeps the Engine loaded.
           grep -F 'if (!prepared.requiresFreshConversation)' "$MH"
           grep -F 'resetConversation(' "$MH"
           grep -F 'AgentCompatRuntimeCoordinator.recordContinuationPreparation' "$MH"
           grep -F 'COMPAT_FRESH_REASON_TOOL_CONTINUATION' "$MH"
 
-          # MCP259: Excel CREATE prompt must advertise the minimal non-duplicating envelope.
+          # Excel CREATE prompt must no longer show the duplicate rows+sheets wide example.
           grep -F 'MCP259_EXCEL_COMPACT_CREATE_SCHEMA' "$TOOLING"
+          grep -F 'excel_workbook: CREATE prefer the shortest form' "$TOOLING"
           grep -F 'sheet_name' "$TOOLING"
           grep -F 'Never duplicate identical rows in both root rows and sheets' "$TOOLING"
+          ! grep -F 'tools += "- excel_workbook arguments:' "$TOOLING"
 
       - name: Checkout stable-diffusion.cpp at MCP250 protected revision
         uses: actions/checkout@v4
@@ -263,3 +264,32 @@ jobs:
           else
             gh api --method PUT "$api" -f message='Add MCP259 Excel latency continuation result' -f branch=experimental -f content="$content"
           fi
+
+      - name: Persist canonical MCP259 run id and status
+        if: always()
+        env:
+          FINAL_JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set +e
+          python3 - <<'PY' > /tmp/mcp259-latency-ci-last-run.json
+          import json, os
+          print(json.dumps({
+            'schema':'local-agent-plaza.mcp259-latency-ci-last-run.v1',
+            'run_id':int(os.environ['GITHUB_RUN_ID']),
+            'run_attempt':int(os.environ.get('GITHUB_RUN_ATTEMPT','1')),
+            'commit_sha':os.environ['GITHUB_SHA'],
+            'job_status':os.environ.get('FINAL_JOB_STATUS','unknown'),
+            'workflow':'MCP259 Excel latency continuation build'
+          }, ensure_ascii=False, indent=2))
+          PY
+          content="$(base64 -w0 /tmp/mcp259-latency-ci-last-run.json)"
+          api="repos/${GITHUB_REPOSITORY}/contents/docs/mcp259_latency_ci_last_run.json"
+          old="$(gh api "$api?ref=experimental" 2>/dev/null || true)"
+          sha="$(printf '%s' "$old" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("sha", ""))' 2>/dev/null || true)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message='Update canonical MCP259 CI last run' -f branch=experimental -f sha="$sha" -f content="$content"
+          else
+            gh api --method PUT "$api" -f message='Add canonical MCP259 CI last run' -f branch=experimental -f content="$content"
+          fi
+          exit 0
