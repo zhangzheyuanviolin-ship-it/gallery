@@ -52,7 +52,7 @@ print(f"MCP259 patched: {COORD}")
 agent_screen = AGENT_SCREEN.read_text(encoding="utf-8")
 if "MCP259_HOST_DISPATCH_ACCEPTED" not in agent_screen:
     old = '''        compatToolStepsByModel[model.name] = currentSteps + 1\n        removeCurrentTurnAgentTextMessages(viewModel = viewModel, model = model)\n'''
-    new = '''        // MCP259_HOST_DISPATCH_ACCEPTED\n        // A parsed call that is actually about to execute is authoritative runtime state.\n        AgentCompatRuntimeCoordinator.onHostToolDispatchAccepted(\n          modelName = model.name,\n          toolName = parsedToolCall.toolName,\n          arguments = parsedToolCall.arguments,\n        )\n        compatToolStepsByModel[model.name] = currentSteps + 1\n        removeCurrentTurnAgentTextMessages(viewModel = viewModel, model = model)\n'''
+    new = '''        compatToolStepsByModel[model.name] = currentSteps + 1\n        // MCP259_HOST_DISPATCH_ACCEPTED\n        // Keep this after the MCP224-owned legacy step-limit block. MCP224 removes that obsolete\n        // block during Gradle configuration; this accepted-dispatch authority must survive it.\n        AgentCompatRuntimeCoordinator.onHostToolDispatchAccepted(\n          modelName = model.name,\n          toolName = parsedToolCall.toolName,\n          arguments = parsedToolCall.arguments,\n        )\n        removeCurrentTurnAgentTextMessages(viewModel = viewModel, model = model)\n'''
     agent_screen = replace_once(
         agent_screen,
         old,
@@ -121,6 +121,13 @@ for required in (
 ):
     if required not in final_screen:
         raise SystemExit(f"MCP259 fail-closed: dispatch synchronization marker missing: {required}")
+
+# MCP224 owns and removes the old fixed-step block. MCP259 must not split that exact anchor before
+# patch_mcp224_model_diagnostics.py runs from Gradle configuration.
+legacy_tail = '''        compatToolStepsByModel[model.name] = currentSteps + 1\n'''
+host_marker = '''        // MCP259_HOST_DISPATCH_ACCEPTED\n'''
+if legacy_tail + host_marker not in final_screen:
+    raise SystemExit("MCP259 fail-closed: host dispatch authority is not immediately after MCP224 legacy block")
 
 final_tooling = TOOLING.read_text(encoding="utf-8")
 for required in (
