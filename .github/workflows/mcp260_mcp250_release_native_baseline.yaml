@@ -1,0 +1,77 @@
+name: MCP260 MCP250 release native baseline audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["experimental"]
+    paths:
+      - '.github/workflows/mcp260_mcp250_release_native_baseline.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Compare released MCP250 native ABI shape
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: mcp250-target-agent-family-state-machine-v1
+      APK: local-agent-plaza-1.0.14-mcp.250.apk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download released MCP250 APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$APK" --dir "$RUNNER_TEMP"
+          sha256sum "$RUNNER_TEMP/$APK"
+      - name: Audit native inventory and direct LiteRT consumers
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - "$RUNNER_TEMP/$APK" <<'PY'
+          import hashlib, re, subprocess, sys, tempfile, zipfile
+          from pathlib import Path
+
+          apk=Path(sys.argv[1])
+          with tempfile.TemporaryDirectory(prefix='mcp250-native-') as td:
+              root=Path(td)
+              with zipfile.ZipFile(apk) as z:
+                  names=sorted(n for n in z.namelist() if n.startswith('lib/arm64-v8a/') and n.endswith('.so'))
+                  for n in names:
+                      z.extract(n, root)
+                  for lib in ('libLiteRt.so','libLiteRtClGlAccelerator.so','liblitert_jni.so','libLiteRtCompilerPlugin_MediaTek.so','libLiteRtCompilerPlugin_Qualcomm.so'):
+                      p='lib/arm64-v8a/'+lib
+                      if p in z.namelist():
+                          data=z.read(p)
+                          print('MCP250_LIB', lib, hashlib.sha256(data).hexdigest(), len(data))
+                      else:
+                          print('MCP250_LIB_MISSING', lib)
+              libdir=root/'lib'/'arm64-v8a'
+              def readelf(*args):
+                  return subprocess.check_output(['readelf',*args], text=True, stderr=subprocess.STDOUT)
+              def syms(path, undef):
+                  out=set()
+                  for line in readelf('-Ws',str(path)).splitlines():
+                      parts=line.split()
+                      if len(parts)>=8 and parts[0].endswith(':') and ((parts[6]=='UND')==undef):
+                          out.add(parts[7].split('@',1)[0])
+                  return out
+              def needed(path):
+                  return set(re.findall(r'Shared library: \[([^]]+)\]', readelf('-d',str(path))))
+              core=libdir/'libLiteRt.so'
+              exports={s for s in syms(core,False) if s.startswith('LiteRt')}
+              print('MCP250_CORE_EXPORTS_FD', 'LiteRtCreateModelFromFd' in exports)
+              for so in sorted(libdir.glob('*.so')):
+                  if 'libLiteRt.so' not in needed(so):
+                      continue
+                  req={s for s in syms(so,True) if s.startswith('LiteRt')}
+                  miss=sorted(req-exports)
+                  digest=hashlib.sha256(so.read_bytes()).hexdigest()
+                  print('MCP250_DIRECT_CORE_CONSUMER', so.name, 'sha256', digest, 'required',len(req),'missing',len(miss))
+                  if miss:
+                      print('MCP250_MISSING', so.name, ','.join(miss))
+          PY

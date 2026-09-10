@@ -1,0 +1,99 @@
+name: MCP255 Excel evidence reader
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["experimental"]
+    paths:
+      - '.github/workflows/mcp255_excel_evidence_read.yaml'
+      - 'logs/mcp-254_测试日志与文档_20260906.zip'
+
+permissions:
+  contents: read
+
+jobs:
+  read-evidence:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout experimental
+        uses: actions/checkout@v4
+        with:
+          ref: experimental
+          fetch-depth: 1
+
+      - name: Read exact MCP254 Excel evidence ZIP
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile, hashlib
+
+          archive = Path('logs/mcp-254_测试日志与文档_20260906.zip')
+          if not archive.exists():
+              raise SystemExit(f'MISSING_EVIDENCE_ZIP: {archive}')
+          with zipfile.ZipFile(archive, 'r') as z:
+              names = z.namelist()
+              print(f'EVIDENCE_ENTRY_COUNT={len(names)}')
+              if len(names) != 3:
+                  raise SystemExit(f'EXPECTED_3_ENTRIES_GOT_{len(names)}')
+              for i, name in enumerate(names, 1):
+                  data = z.read(name)
+                  print(f'\n===== EVIDENCE_ENTRY {i}/{len(names)}: {name} size={len(data)} sha256={hashlib.sha256(data).hexdigest()} =====')
+                  try:
+                      text = data.decode('utf-8')
+                      print(text)
+                      if name.endswith('.txt'):
+                          print('===== TOOL_CALL_REPR =====')
+                          for line in text.splitlines():
+                              if 'tool_call' in line or 'call:excel_workbook' in line:
+                                  print(repr(line))
+                                  print('CODEPOINTS=' + ' '.join(f'U+{ord(ch):04X}' for ch in line if ord(ch) > 127 or ch in '<>|_'))
+                          print('===== END_TOOL_CALL_REPR =====')
+                  except UnicodeDecodeError:
+                      print(f'[BINARY_ENTRY size={len(data)}]')
+                  print(f'===== END_EVIDENCE_ENTRY {i}: {name} =====\n')
+          PY
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Materialize 254 parser and run exact wire probes
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd Android/src
+          python3 scripts/patch_mcp251_office_skills.py
+          python3 scripts/patch_mcp252_office_truth.py
+          python3 scripts/patch_mcp253_office_contract.py
+          python3 scripts/patch_mcp254_document_conversion.py
+          # Gradle configuration applies patch_tool_call_wire_compat.py exactly as the release build does.
+          cat > app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp255WireProbeTest.kt <<'KT'
+          package com.google.ai.edge.gallery.customtasks.agentchat
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Assert.assertNotNull
+          import org.junit.Test
+
+          class Mcp255WireProbeTest {
+            @Test fun observedCompactGemmaExcelCall_isParsed() {
+              val raw = "<|tool_call>call:excel_workbook{operation:\"create\",rows:[[\"国家\",\"模型名称\",\"开发者\",\"模型特点\"],[\"中国\",\"Qwen\",\"阿里巴巴\",\"中文能力\"]]}<tool_call|>"
+              val call = parseCompatToolCall(raw)
+              assertNotNull(call)
+              assertEquals("excel_workbook", call!!.toolName)
+              assertEquals("create", call.arguments.getString("operation"))
+              assertEquals(2, call.arguments.getJSONArray("rows").length())
+            }
+
+            @Test fun zeroWidthAroundXmlToolCall_isParsed() {
+              val raw = "\u200B<tool_call>\u200B{\"tool\":\"excel_workbook\",\"arguments\":{\"operation\":\"create\",\"rows\":[[[\"项目名称\",\"预算\"],[\"市场推广\",\"50000\"]]],\"sheets\":[{\"name\":\"项目进度表\"}]}}\u200B</tool_call>\u200B"
+              val call = parseCompatToolCall(raw)
+              assertNotNull(call)
+              assertEquals("excel_workbook", call!!.toolName)
+            }
+          }
+          KT
+          ./gradlew :app:testReleaseUnitTest --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp255WireProbeTest' --stacktrace

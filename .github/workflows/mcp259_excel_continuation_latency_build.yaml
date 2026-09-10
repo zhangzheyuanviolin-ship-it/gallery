@@ -1,0 +1,21 @@
+name: MCP259 duplicate workflow superseded
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["experimental"]
+    paths:
+      - '.github/workflows/mcp259_excel_continuation_latency_build.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp259-excel-continuation-latency
+  cancel-in-progress: true
+
+jobs:
+  superseded:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo 'Superseded by mcp259_excel_latency_continuation_build.yaml'

@@ -1,0 +1,15 @@
+{
+  "schema": "local-agent-plaza.mcp258-excel-execution-recovery-result.v1",
+  "run_id": 34230228146,
+  "commit_sha": "3a390b1095977a4877f70accd3f397aa2b6be60b",
+  "version_name": "1.0.14-mcp.258",
+  "version_code": 358,
+  "package": "com.localagent.plaza.mcp",
+  "release_tag": "mcp258-excel-execution-recovery-v1",
+  "apk_name": "local-agent-plaza-1.0.14-mcp.258.apk",
+  "apk_sha256": "50e2322e70b216ab116103b39f05dd020b94935511e71211698db42ca0653b4e",
+  "root_cause": "latest phone excel_workbook envelope was semantically complete but omitted one final outer JSON object brace; MCP257 therefore captured the right raw text but parsing still returned null and the leak guard hid a recoverable call",
+  "fix": "structurally prove and close truncated tool objects, resolve no-input rows/sheets Excel payloads directly to xlsx_create, then use the existing collision-safe XLSX writer and read-back verifier",
+  "acceptance": "actual XLSX file creation in the configured phone workspace is the final device-level pass criterion",
+  "apk_url": "https://github.com/zhangzheyuanviolin-ship-it/local-agent-plaza/releases/download/mcp258-excel-execution-recovery-v1/local-agent-plaza-1.0.14-mcp.258.apk"
+}

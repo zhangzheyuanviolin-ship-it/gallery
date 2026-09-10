@@ -1,0 +1,16 @@
+{
+  "schema": "local-agent-plaza.mcp255-excel-evidence-result.v1",
+  "run_id": 34079284002,
+  "commit_sha": "f77e3645c40e2b9ed2dbbb37cf3abb35dd2929e2",
+  "version_name": "1.0.14-mcp.255",
+  "version_code": 355,
+  "package": "com.localagent.plaza.mcp",
+  "release_tag": "mcp255-excel-evidence-v1",
+  "apk_name": "local-agent-plaza-1.0.14-mcp.255.apk",
+  "apk_sha256": "39dc65b5c25364804b3e0f25deca8344b58cedeb3c86fd3b0992ad4f922f2586",
+  "evidence_zip": "logs/mcp-254_测试日志与文档_20260906.zip",
+  "evidence_entries": 3,
+  "excel_log_entries": 2,
+  "chat_record_entries": 1,
+  "apk_url": "https://github.com/zhangzheyuanviolin-ship-it/local-agent-plaza/releases/download/mcp255-excel-evidence-v1/local-agent-plaza-1.0.14-mcp.255.apk"
+}

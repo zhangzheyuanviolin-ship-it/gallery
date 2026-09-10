@@ -1,0 +1,227 @@
+name: MCP258 Excel execution recovery build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["experimental"]
+    paths:
+      - '.github/workflows/mcp258_excel_execution_recovery_build.yaml'
+      - 'Android/src/scripts/patch_mcp258_excel_execution_recovery.py'
+      - 'Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTextToolCallFallback.kt'
+      - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentExcelMcp255CompatTest.kt'
+      - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp256PhoneToolCallRegressionTest.kt'
+      - 'Android/src/app/src/test/java/com/google/ai/edge/gallery/customtasks/agentchat/Mcp258ExcelExecutionRecoveryTest.kt'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: mcp258-excel-execution-recovery
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Recover parse execute verify and publish MCP258
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LOCAL_VERSION_NAME: '1.0.14-mcp.258'
+      LOCAL_VERSION_CODE: '358'
+      APPLICATION_ID_SUFFIX: '.mcp'
+      APK_RELEASE_TAG: 'mcp258-excel-execution-recovery-v1'
+      APK_NAME: 'local-agent-plaza-1.0.14-mcp.258.apk'
+      ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+      ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+      ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout experimental source
+        uses: actions/checkout@v4
+        with:
+          ref: experimental
+          fetch-depth: 0
+
+      - name: Verify MCP250 protected boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin golden/mcp-250-product-stable:refs/remotes/origin/golden/mcp-250-product-stable
+          test "$(git rev-parse refs/remotes/origin/golden/mcp-250-product-stable)" = '4a4346a199344ac0912984f1f383abedf3b93819'
+          git diff --name-status refs/remotes/origin/golden/mcp-250-product-stable...HEAD | tee /tmp/mcp258-source-diff.txt
+          ! grep -E 'customtasks/(musicgeneration|visualcreation)/|app/src/main/jniLibs/arm64-v8a/' /tmp/mcp258-source-diff.txt
+
+      - name: Materialize MCP251 through MCP258 and prove Excel execution route
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for p in patch_mcp251_office_skills.py patch_mcp252_office_truth.py patch_mcp253_office_contract.py patch_mcp254_document_conversion.py patch_mcp255_excel_evidence.py patch_mcp256_text_tool_dispatch.py patch_mcp257_runtime_raw_completion.py patch_mcp258_excel_execution_recovery.py patch_mcp257_pre_mcp224_bridge.py; do
+            python3 -m py_compile "Android/src/scripts/$p"
+          done
+          cd Android/src
+          python3 scripts/patch_mcp251_office_skills.py
+          python3 scripts/patch_mcp252_office_truth.py
+          python3 scripts/patch_mcp253_office_contract.py
+          python3 scripts/patch_mcp254_document_conversion.py
+          python3 scripts/patch_mcp255_excel_evidence.py
+          python3 scripts/patch_mcp256_text_tool_dispatch.py
+          python3 scripts/patch_mcp257_runtime_raw_completion.py
+          python3 scripts/patch_mcp258_excel_execution_recovery.py
+          # MCP224 remains owner of the legacy fixed-step block and removes it during Gradle config.
+          python3 scripts/patch_mcp257_pre_mcp224_bridge.py
+
+          AS='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentChatScreen.kt'
+          AT='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTools.kt'
+          TG='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentOfficeTruthGuard.kt'
+          OS='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentOfficeDocumentSupport.kt'
+          FB='app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/AgentTextToolCallFallback.kt'
+          VM='app/src/main/java/com/google/ai/edge/gallery/ui/llmchat/LlmChatViewModel.kt'
+
+          # Runtime must still deliver the complete model completion to dispatch.
+          grep -F 'MCP257_RUNTIME_RAW_COMPLETION' "$VM"
+          grep -F 'MCP257_RUNTIME_RAW_TEXT_AUTHORITY' "$AS"
+          grep -F 'agentTools.executeCompatToolCall(parsedToolCall.toolName, parsedToolCall.arguments)' "$AS"
+
+          # Latest malformed phone envelope must be repairable, then route all the way to XLSX create.
+          grep -F 'MCP258_TRUNCATED_TOOL_OBJECT_CLOSE_REPAIR' "$FB"
+          grep -F 'repairTruncatedToolObjectClosures' "$FB"
+          grep -F 'MCP258_UNAMBIGUOUS_EXCEL_CREATE' "$TG"
+          grep -F '"payload_unambiguous_create"' "$TG"
+          grep -F 'return if (hasRows || hasSheets) "xlsx_create" else null' "$TG"
+          grep -F '"excel_workbook" -> runOfficeCompatTool(EXCEL_WORKBOOK_SKILL_NAME, arguments)' "$AT"
+          grep -F 'AgentOfficeTruthGuard.prepareCompatRequest' "$AT"
+          grep -F 'AgentOfficeTruthGuard.executeVerified' app/src/main/java/com/google/ai/edge/gallery/customtasks/agentchat/IntentHandler.kt
+          grep -F '"xlsx_create" -> createXlsx(context, root, request)' "$OS"
+          grep -F 'private fun createXlsx' "$OS"
+          grep -F 'writeBytes(' "$OS"
+
+      - name: Checkout stable-diffusion.cpp at MCP250 protected revision
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 19bdfe22d255d5b4dff39d449318b9bc5ea2317f
+          path: Android/src/app/src/main/cpp/third_party/stable-diffusion.cpp
+          submodules: recursive
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare release signing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
+          test -n "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_RELEASE_KEY_ALIAS"
+          test -n "$ANDROID_RELEASE_KEY_PASSWORD"
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/local-agent-plaza-release.jks"
+          echo "ANDROID_RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/local-agent-plaza-release.jks" >> "$GITHUB_ENV"
+
+      - name: Run exact phone recovery Office regressions and build release APK
+        working-directory: Android/src
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./gradlew :app:testReleaseUnitTest \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentOfficeTruthGuardTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentOfficeMcp253CompatTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentDocumentConversionMcp254Test' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentExcelMcp255CompatTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp255WireEvidenceTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp256PhoneToolCallRegressionTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp257RuntimeRawCompletionRegressionTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp258ExcelExecutionRecoveryTest' \
+            --tests '*ToolCall*Test' \
+            :app:assembleRelease --stacktrace
+
+      - name: Verify protected runtime boundaries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git diff --exit-code refs/remotes/origin/golden/mcp-250-product-stable -- \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/musicgeneration \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/visualcreation \
+            Android/src/app/src/main/jniLibs/arm64-v8a
+
+      - name: Verify signed MCP258 APK identity Office assets and execution markers
+        id: verify
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD_TOOLS="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          APK='Android/src/app/build/outputs/apk/release/app-release.apk'
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$APK"
+          BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -n 1)"
+          echo "$BADGING" | grep "name='com.localagent.plaza.mcp'"
+          echo "$BADGING" | grep "versionCode='358'"
+          echo "$BADGING" | grep "versionName='1.0.14-mcp.258'"
+          for skill in word-document pdf-document excel-workbook powerpoint-presentation document-convert; do
+            unzip -l "$APK" | grep "assets/skills/$skill/SKILL.md"
+          done
+          mkdir -p "$RUNNER_TEMP/dex"
+          unzip -q "$APK" 'classes*.dex' -d "$RUNNER_TEMP/dex"
+          grep -a -F 'AgentTextToolCallFallback' "$RUNNER_TEMP"/dex/classes*.dex
+          grep -a -F 'payload_unambiguous_create' "$RUNNER_TEMP"/dex/classes*.dex
+          grep -a -F 'xlsx_create' "$RUNNER_TEMP"/dex/classes*.dex
+          cp "$APK" "$RUNNER_TEMP/$APK_NAME"
+          SHA="$(sha256sum "$RUNNER_TEMP/$APK_NAME" | cut -d' ' -f1)"
+          echo "$SHA  $APK_NAME" > "$RUNNER_TEMP/$APK_NAME.sha256"
+          echo "apk_sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Upload MCP258 Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-agent-plaza-mcp-258
+          path: |
+            ${{ runner.temp }}/${{ env.APK_NAME }}
+            ${{ runner.temp }}/${{ env.APK_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish permanent MCP258 GitHub Release
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gh release view "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title 'Local Agent Plaza MCP258 Excel Execution Recovery' \
+              --notes 'MCP258 targets the actual user goal: a malformed but structurally recoverable textual excel_workbook call must execute and create an XLSX in the configured workspace. It repairs the exact 2026-09-08 phone envelope that omitted one final outer JSON brace, resolves rows/sheets-without-input directly to xlsx_create, preserves MCP257 full runtime completion capture, and keeps the existing collision-safe XLSX writer plus semantic read-back verification. Protocol hiding alone is not considered success; phone workspace file creation remains the final acceptance test.'
+          gh release upload "$APK_RELEASE_TAG" "$RUNNER_TEMP/$APK_NAME" "$RUNNER_TEMP/$APK_NAME.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Write MCP258 result marker
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY' > /tmp/mcp258-result.json
+          import json, os
+          print(json.dumps({
+            'schema':'local-agent-plaza.mcp258-excel-execution-recovery-result.v1',
+            'run_id':int(os.environ['GITHUB_RUN_ID']),
+            'commit_sha':os.environ['GITHUB_SHA'],
+            'version_name':os.environ['LOCAL_VERSION_NAME'],
+            'version_code':int(os.environ['LOCAL_VERSION_CODE']),
+            'package':'com.localagent.plaza.mcp',
+            'release_tag':os.environ['APK_RELEASE_TAG'],
+            'apk_name':os.environ['APK_NAME'],
+            'apk_sha256':'${{ steps.verify.outputs.apk_sha256 }}',
+            'root_cause':'latest phone excel_workbook envelope was semantically complete but omitted one final outer JSON object brace; MCP257 therefore captured the right raw text but parsing still returned null and the leak guard hid a recoverable call',
+            'fix':'structurally prove and close truncated tool objects, resolve no-input rows/sheets Excel payloads directly to xlsx_create, then use the existing collision-safe XLSX writer and read-back verifier',
+            'acceptance':'actual XLSX file creation in the configured phone workspace is the final device-level pass criterion',
+            'apk_url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['APK_RELEASE_TAG']}/{os.environ['APK_NAME']}"
+          }, ensure_ascii=False, indent=2))
+          PY
+          content="$(base64 -w0 /tmp/mcp258-result.json)"
+          api="repos/${GITHUB_REPOSITORY}/contents/docs/mcp258_excel_execution_recovery_result.json"
+          old="$(gh api "$api?ref=experimental" 2>/dev/null || true)"
+          sha="$(printf '%s' "$old" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("sha", ""))' 2>/dev/null || true)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message='Update MCP258 Excel execution recovery result' -f branch=experimental -f sha="$sha" -f content="$content"
+          else
+            gh api --method PUT "$api" -f message='Add MCP258 Excel execution recovery result' -f branch=experimental -f content="$content"
+          fi

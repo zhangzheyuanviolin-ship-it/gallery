@@ -1,0 +1,291 @@
+name: MCP260 core runtime emergency restore
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["experimental"]
+    paths:
+      - '.github/workflows/mcp260_core_runtime_emergency_restore.yaml'
+      - 'Android/src/scripts/audit_mcp260_core_surface.py'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: mcp260-core-runtime-emergency-restore
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Restore golden media runtime audit whole app and publish MCP260
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LOCAL_VERSION_NAME: '1.0.14-mcp.260'
+      LOCAL_VERSION_CODE: '360'
+      APPLICATION_ID_SUFFIX: '.mcp'
+      APK_RELEASE_TAG: 'mcp260-core-runtime-emergency-restore-v1'
+      APK_NAME: 'local-agent-plaza-1.0.14-mcp.260.apk'
+      ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+      ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+      ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+      ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout experimental source
+        uses: actions/checkout@v4
+        with:
+          ref: experimental
+          fetch-depth: 0
+
+      - name: Verify MCP250 core product boundary and legacy skills
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin golden/mcp-250-product-stable:refs/remotes/origin/golden/mcp-250-product-stable
+          GOLD='refs/remotes/origin/golden/mcp-250-product-stable'
+          test "$(git rev-parse "$GOLD")" = '4a4346a199344ac0912984f1f383abedf3b93819'
+
+          # Highest-priority product surfaces must remain byte-for-byte source-identical to MCP250.
+          git diff --exit-code "$GOLD" -- \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/aikeyboard \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/mobileactions \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/musicgeneration \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/tinygarden \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/videoqa \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/visionnarration \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/visualcreation \
+            Android/src/app/src/main/jniLibs/arm64-v8a
+
+          # Office may only ADD/CHANGE its own five skill directories. Established Agent skills are protected.
+          unexpected="$(git diff --name-only "$GOLD" -- Android/src/app/src/main/assets/skills | \
+            grep -Ev '^Android/src/app/src/main/assets/skills/(word-document|pdf-document|excel-workbook|powerpoint-presentation|document-convert)/' || true)"
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected change to a pre-Office skill:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+
+          # The historical emergency restore/audit scripts themselves must still be exactly MCP250.
+          test "$(git rev-parse HEAD:Android/src/scripts/patch_box_music_apk.py)" = \
+               "$(git rev-parse "$GOLD":Android/src/scripts/patch_box_music_apk.py)"
+          test "$(git rev-parse HEAD:Android/src/scripts/audit_box_music_apk.py)" = \
+               "$(git rev-parse "$GOLD":Android/src/scripts/audit_box_music_apk.py)"
+
+      - name: Materialize MCP251 through MCP259 without touching core media source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for p in \
+            patch_mcp251_office_skills.py \
+            patch_mcp252_office_truth.py \
+            patch_mcp253_office_contract.py \
+            patch_mcp254_document_conversion.py \
+            patch_mcp255_excel_evidence.py \
+            patch_mcp256_text_tool_dispatch.py \
+            patch_mcp257_runtime_raw_completion.py \
+            patch_mcp258_excel_execution_recovery.py \
+            patch_mcp259_excel_latency_continuation.py \
+            patch_mcp257_pre_mcp224_bridge.py \
+            patch_box_music_apk.py \
+            audit_box_music_apk.py \
+            audit_mcp260_core_surface.py; do
+              python3 -m py_compile "Android/src/scripts/$p"
+          done
+
+          cd Android/src
+          python3 scripts/patch_mcp251_office_skills.py
+          python3 scripts/patch_mcp252_office_truth.py
+          python3 scripts/patch_mcp253_office_contract.py
+          python3 scripts/patch_mcp254_document_conversion.py
+          python3 scripts/patch_mcp255_excel_evidence.py
+          python3 scripts/patch_mcp256_text_tool_dispatch.py
+          python3 scripts/patch_mcp257_runtime_raw_completion.py
+          python3 scripts/patch_mcp258_excel_execution_recovery.py
+          python3 scripts/patch_mcp259_excel_latency_continuation.py
+          python3 scripts/patch_mcp257_pre_mcp224_bridge.py
+
+          # Verify the media/core task source stayed exactly at the protected product boundary.
+          cd ../..
+          GOLD='refs/remotes/origin/golden/mcp-250-product-stable'
+          git diff --exit-code "$GOLD" -- \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/aikeyboard \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/mobileactions \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/musicgeneration \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/tinygarden \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/videoqa \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/visionnarration \
+            Android/src/app/src/main/java/com/google/ai/edge/gallery/customtasks/visualcreation \
+            Android/src/app/src/main/jniLibs/arm64-v8a
+
+      - name: Checkout stable-diffusion.cpp at MCP250 protected revision
+        uses: actions/checkout@v4
+        with:
+          repository: leejet/stable-diffusion.cpp
+          ref: 19bdfe22d255d5b4dff39d449318b9bc5ea2317f
+          path: Android/src/app/src/main/cpp/third_party/stable-diffusion.cpp
+          submodules: recursive
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare release signing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -n "$ANDROID_RELEASE_KEYSTORE_BASE64"
+          test -n "$ANDROID_RELEASE_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_RELEASE_KEY_ALIAS"
+          test -n "$ANDROID_RELEASE_KEY_PASSWORD"
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/local-agent-plaza-release.jks"
+          echo "ANDROID_RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/local-agent-plaza-release.jks" >> "$GITHUB_ENV"
+
+      - name: Run current Agent Office regressions and build raw release APK
+        working-directory: Android/src
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./gradlew :app:testReleaseUnitTest \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentOfficeTruthGuardTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentOfficeMcp253CompatTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentDocumentConversionMcp254Test' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.AgentExcelMcp255CompatTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp255WireEvidenceTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp256PhoneToolCallRegressionTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp257RuntimeRawCompletionRegressionTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp258ExcelExecutionRecoveryTest' \
+            --tests 'com.google.ai.edge.gallery.customtasks.agentchat.Mcp259ExcelLatencyContinuationRegressionTest' \
+            --tests '*ToolCall*Test' \
+            :app:assembleRelease --stacktrace
+          test -s app/build/outputs/apk/release/app-release.apk
+
+      - name: Restore MCP250 device-proven LiteRT media runtime after Gradle packaging
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD_TOOLS="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          RAW='Android/src/app/build/outputs/apk/release/app-release.apk'
+          PATCHED="$RUNNER_TEMP/mcp260-runtime-pinned-unsigned.apk"
+          ALIGNED="$RUNNER_TEMP/mcp260-runtime-pinned-aligned.apk"
+          FINAL="$RUNNER_TEMP/$APK_NAME"
+
+          # Record the raw Gradle hashes for forensic evidence. The raw APK must never be published.
+          python3 - "$RAW" <<'PY'
+          import hashlib, sys, zipfile
+          apk=sys.argv[1]
+          libs=('libLiteRt.so','libLiteRtClGlAccelerator.so','liblitert_jni.so')
+          with zipfile.ZipFile(apk) as z:
+              for lib in libs:
+                  data=z.read('lib/arm64-v8a/'+lib)
+                  print('RAW_GRADLE_NATIVE', lib, hashlib.sha256(data).hexdigest(), len(data))
+          PY
+
+          python3 Android/src/scripts/patch_box_music_apk.py "$RAW" "$PATCHED"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/zipalign" -f -p 4 "$PATCHED" "$ALIGNED"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" sign \
+            --ks "$ANDROID_RELEASE_KEYSTORE_PATH" \
+            --ks-pass "pass:$ANDROID_RELEASE_KEYSTORE_PASSWORD" \
+            --ks-key-alias "$ANDROID_RELEASE_KEY_ALIAS" \
+            --key-pass "pass:$ANDROID_RELEASE_KEY_PASSWORD" \
+            --out "$FINAL" "$ALIGNED"
+          test -s "$FINAL"
+
+      - name: Audit final APK golden media ABI and whole-app runtime surface
+        id: verify
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BUILD_TOOLS="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          APK="$RUNNER_TEMP/$APK_NAME"
+
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$APK"
+          BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -n 1)"
+          echo "$BADGING" | grep "name='com.localagent.plaza.mcp'"
+          echo "$BADGING" | grep "versionCode='360'"
+          echo "$BADGING" | grep "versionName='1.0.14-mcp.260'"
+
+          # Historical device-proven music/Flux media runtime gate.
+          python3 Android/src/scripts/audit_box_music_apk.py "$APK"
+
+          # New whole-app gate: all direct LiteRT consumers must close against the actual packaged
+          # core, and independent LLM/StableDiffusion/Vosk/visual runtimes plus old Agent skills survive.
+          python3 Android/src/scripts/audit_mcp260_core_surface.py "$APK"
+
+          # Protect the current Excel/Agent repairs in the exact final post-patch APK.
+          mkdir -p "$RUNNER_TEMP/dex"
+          unzip -q "$APK" 'classes*.dex' -d "$RUNNER_TEMP/dex"
+          grep -a -F 'AgentTextToolCallFallback' "$RUNNER_TEMP"/dex/classes*.dex
+          grep -a -F 'onHostToolDispatchAccepted' "$RUNNER_TEMP"/dex/classes*.dex
+          grep -a -F 'tool_continuation' "$RUNNER_TEMP"/dex/classes*.dex
+          grep -a -F 'xlsx_create' "$RUNNER_TEMP"/dex/classes*.dex
+          grep -a -F 'Never duplicate identical rows' "$RUNNER_TEMP"/dex/classes*.dex
+
+          for skill in \
+            anysearch-search exa-search langsearch-search tavily-search media-toolbox file-workspace \
+            long-text-writer weather-query web-page-extract edge-tts minimax-omni \
+            word-document pdf-document excel-workbook powerpoint-presentation document-convert; do
+              unzip -l "$APK" | grep "assets/skills/$skill/SKILL.md"
+          done
+
+          SHA="$(sha256sum "$APK" | cut -d' ' -f1)"
+          echo "$SHA  $APK_NAME" > "$RUNNER_TEMP/$APK_NAME.sha256"
+          echo "apk_sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Upload MCP260 Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-agent-plaza-mcp-260
+          path: |
+            ${{ runner.temp }}/${{ env.APK_NAME }}
+            ${{ runner.temp }}/${{ env.APK_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish permanent MCP260 GitHub Release
+        shell: bash
+        run: |
+          set -euxo pipefail
+          gh release view "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$APK_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title 'Local Agent Plaza MCP260 Core Runtime Emergency Restore' \
+              --notes 'Emergency core-media recovery. MCP251-MCP259 release workflows dropped the post-Gradle Box 0.4.9 / LiteRT native overlay that MCP247-MCP250 required. The resulting APK could package liblitert_jni.so requiring LiteRtCreateModelFromFd together with a libLiteRt.so that did not export that symbol, causing confirmed local music and Flux dlopen failures and a LiteRT Environment failure in another visual model. MCP260 keeps the phone-validated Excel/Agent fixes, then restores the exact MCP250 device-proven LiteRT native binaries after assembleRelease, zipaligns and re-signs, runs the historical golden Box audit, and additionally validates whole-APK LiteRT ABI closure plus AI keyboard, Stable Diffusion, Vosk, video QA, vision narration, visual creation, TinyGarden, and established Agent skill surfaces. Phone validation of music, Flux, the large LiteRT visual model, and representative independent modules remains required.'
+          gh release upload "$APK_RELEASE_TAG" "$RUNNER_TEMP/$APK_NAME" "$RUNNER_TEMP/$APK_NAME.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Write MCP260 result marker
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY' > /tmp/mcp260-result.json
+          import json, os
+          print(json.dumps({
+            'schema':'local-agent-plaza.mcp260-core-runtime-emergency-restore-result.v1',
+            'run_id':int(os.environ['GITHUB_RUN_ID']),
+            'commit_sha':os.environ['GITHUB_SHA'],
+            'version_name':os.environ['LOCAL_VERSION_NAME'],
+            'version_code':int(os.environ['LOCAL_VERSION_CODE']),
+            'package':'com.localagent.plaza.mcp',
+            'release_tag':os.environ['APK_RELEASE_TAG'],
+            'apk_name':os.environ['APK_NAME'],
+            'apk_sha256':'${{ steps.verify.outputs.apk_sha256 }}',
+            'protected_boundary':'4a4346a199344ac0912984f1f383abedf3b93819',
+            'first_confirmed_pipeline_regression':'MCP251 release workflow omitted the post-Gradle patch_box_music_apk.py + audit_box_music_apk.py path that MCP247-MCP250 required',
+            'confirmed_mcp259_binary_fault':'packaged liblitert_jni.so requires LiteRtCreateModelFromFd while packaged libLiteRt.so does not export it',
+            'repair':'restore exact MCP250 device-proven Box 0.4.9 / LiteRT native binaries after assembleRelease, then zipalign, re-sign, historical golden audit, and whole-app ABI/surface audit',
+            'static_acceptance':'exact golden media hashes and complete LiteRT ABI closure; LiteRT-LM/StableDiffusion/Vosk/visual JNI independent surfaces remain present; protected custom-task sources and pre-Office skills remain unchanged; MCP259 Excel/continuation markers remain in final APK',
+            'phone_acceptance':'music generation, Flux, large LiteRT visual model, TinyGarden, Local Dream/Stable Diffusion, AI keyboard pipeline, local speech input, vision narration, video QA/audio QA as applicable, and representative legacy Agent tools must be rechecked on device',
+            'apk_url':f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['APK_RELEASE_TAG']}/{os.environ['APK_NAME']}"
+          }, ensure_ascii=False, indent=2))
+          PY
+          content="$(base64 -w0 /tmp/mcp260-result.json)"
+          api="repos/${GITHUB_REPOSITORY}/contents/docs/mcp260_core_runtime_emergency_restore_result.json"
+          old="$(gh api "$api?ref=experimental" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$old" ]; then
+            gh api --method PUT "$api" -f message='Update MCP260 core runtime emergency restore result' -f branch=experimental -f sha="$old" -f content="$content"
+          else
+            gh api --method PUT "$api" -f message='Add MCP260 core runtime emergency restore result' -f branch=experimental -f content="$content"
+          fi
