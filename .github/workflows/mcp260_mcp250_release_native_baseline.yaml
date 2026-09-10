@@ -41,8 +41,9 @@ jobs:
               root=Path(td)
               with zipfile.ZipFile(apk) as z:
                   names=sorted(n for n in z.namelist() if n.startswith('lib/arm64-v8a/') and n.endswith('.so'))
-                  for n in names: z.extract(n, root)
-                  for lib in ('libLiteRt.so','libLiteRtClGlAccelerator.so','liblitert_jni.so','libLiteRtCompilerPlugin_MediaTek.so'):
+                  for n in names:
+                      z.extract(n, root)
+                  for lib in ('libLiteRt.so','libLiteRtClGlAccelerator.so','liblitert_jni.so','libLiteRtCompilerPlugin_MediaTek.so','libLiteRtCompilerPlugin_Qualcomm.so'):
                       p='lib/arm64-v8a/'+lib
                       if p in z.namelist():
                           data=z.read(p)
@@ -69,7 +70,8 @@ jobs:
                       continue
                   req={s for s in syms(so,True) if s.startswith('LiteRt')}
                   miss=sorted(req-exports)
-                  print('MCP250_DIRECT_CORE_CONSUMER', so.name, 'required',len(req),'missing',len(miss))
+                  digest=hashlib.sha256(so.read_bytes()).hexdigest()
+                  print('MCP250_DIRECT_CORE_CONSUMER', so.name, 'sha256', digest, 'required',len(req),'missing',len(miss))
                   if miss:
                       print('MCP250_MISSING', so.name, ','.join(miss))
           PY
