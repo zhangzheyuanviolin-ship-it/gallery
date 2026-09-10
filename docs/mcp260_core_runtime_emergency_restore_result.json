@@ -1,0 +1,18 @@
+{
+  "schema": "local-agent-plaza.mcp260-core-runtime-emergency-restore-result.v1",
+  "run_id": 34455521137,
+  "commit_sha": "b5b97e21be820f9add140a5195cf4ef25da2570f",
+  "version_name": "1.0.14-mcp.260",
+  "version_code": 360,
+  "package": "com.localagent.plaza.mcp",
+  "release_tag": "mcp260-core-runtime-emergency-restore-v1",
+  "apk_name": "local-agent-plaza-1.0.14-mcp.260.apk",
+  "apk_sha256": "b6fc8d69b8fde66e52914bf66725fa389ad51b85e1e617ddd3fefaba6ed3e0ff",
+  "protected_boundary": "4a4346a199344ac0912984f1f383abedf3b93819",
+  "first_confirmed_pipeline_regression": "MCP251 release workflow omitted the post-Gradle patch_box_music_apk.py + audit_box_music_apk.py path that MCP247-MCP250 required",
+  "confirmed_mcp259_binary_fault": "packaged liblitert_jni.so requires LiteRtCreateModelFromFd while packaged libLiteRt.so does not export it",
+  "repair": "restore exact MCP250 device-proven Box 0.4.9 / LiteRT native binaries after assembleRelease, then zipalign, re-sign, historical golden audit, and whole-app ABI/surface audit",
+  "static_acceptance": "exact golden media hashes and complete LiteRT ABI closure; LiteRT-LM/StableDiffusion/Vosk/visual JNI independent surfaces remain present; protected custom-task sources and pre-Office skills remain unchanged; MCP259 Excel/continuation markers remain in final APK",
+  "phone_acceptance": "music generation, Flux, large LiteRT visual model, TinyGarden, Local Dream/Stable Diffusion, AI keyboard pipeline, local speech input, vision narration, video QA/audio QA as applicable, and representative legacy Agent tools must be rechecked on device",
+  "apk_url": "https://github.com/zhangzheyuanviolin-ship-it/local-agent-plaza/releases/download/mcp260-core-runtime-emergency-restore-v1/local-agent-plaza-1.0.14-mcp.260.apk"
+}
